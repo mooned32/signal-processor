@@ -45,3 +45,7 @@ uv run pyinstaller --noconfirm --onedir --windowed `
 ```
 
 *Примечание:* Итоговая папка `dist/SignalProcessor` будет содержать `SignalProcessor.exe` и внешний файл `config.toml`, который можно редактировать без пересборки приложения.
+
+## Интерфейс
+
+![image](.github/assets/ui.png)

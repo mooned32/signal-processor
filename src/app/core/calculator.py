@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Any
+import tomllib
 
 import numpy as np
 import pandas as pd
-import tomllib
 
 from .parser import load_spectrum_txt
 
@@ -19,97 +19,80 @@ def calculate_data(
     file_sn_path: Path, file_n_path: Path, config_path: Path
 ) -> tuple[pd.DataFrame, float]:
     """
-    Выполняет сопоставление и расчёт таблицы.
-    Возвращает (итоговый DataFrame, скалярное значение W).
+    Выполняет сопоставление по меткам C и расчёт таблицы.
+    Возвращает (итоговый DataFrame со столбцом W, скалярное значение W).
     """
     config = load_config(config_path)
-
-    points_section: dict[str, Any] = config.get("points", {})
     constants_section: dict[str, Any] = config.get("constants", {})
 
-    raw_targets: list[float] = [float(t) for t in points_section.get("targets", [])]
-    c_constants: list[float] = [float(c) for c in constants_section.get("C", [])]
-    y_constants: list[float] = [float(y) for y in constants_section.get("Y", [])]
+    raw_c: list[Any] = list(constants_section.get("C", []))
+    if len(raw_c) != 20:
+        raise ValueError(f"В конфиге C должно быть ровно 20 элементов (сейчас {len(raw_c)})!")
 
-    if not (len(raw_targets) == len(c_constants) == len(y_constants) == 20):
-        raise ValueError("В конфиге targets, C и Y должны содержать ровно 20 элементов!")
+    # Сортируем C по возрастанию и формируем i от 1 до 20
+    sorted_c = sorted([int(c) for c in raw_c])
 
-    # Сортируем опорные значения и связываем с C и Y
-    points_df = (
-        pd.DataFrame(
-            {
-                "target": [round(t, 4) for t in raw_targets],
-                "C": c_constants,
-                "Y": y_constants,
-            }
-        )
-        .sort_values(by="target")
-        .reset_index(drop=True)
-    )
+    points_df = pd.DataFrame({
+        "i": np.arange(1, 21, dtype=int),
+        "C": sorted_c,
+        "target_freq": [float(c) for c in sorted_c]
+    })
 
-    points_df["i"] = np.arange(1, 21, dtype=int)
-
-    # Считываем спектры
+    # Считываем спектры (32k строк)
     df_sn = load_spectrum_txt(file_sn_path)  # Сигнал + Шум
-    df_n = load_spectrum_txt(file_n_path)  # Шум
+    df_n = load_spectrum_txt(file_n_path)   # Шум
 
-    # Pyright stubs ошибочно типизируют tolerance как int | timedelta | None
+    # Ищем строки по значению C с допуском (например, для "500.00" и 500)
     tolerance_val: Any = 1e-3
 
     merged_sn = pd.merge_asof(
-        points_df.sort_values("target"),
+        points_df.sort_values("target_freq"),
         df_sn.sort_values("freq"),
-        left_on="target",
+        left_on="target_freq",
         right_on="freq",
         direction="nearest",
         tolerance=tolerance_val,
     ).rename(columns={"voltage": "U_сш_i"})
 
     merged = pd.merge_asof(
-        merged_sn.sort_values("target"),
+        merged_sn.sort_values("target_freq"),
         df_n.sort_values("freq"),
-        left_on="target",
+        left_on="target_freq",
         right_on="freq",
         direction="nearest",
         tolerance=tolerance_val,
-    ).rename(columns={"voltage": "U_ш_i"})
+    ).rename(columns={"voltage": "U_ш_i"}).sort_values("i").reset_index(drop=True)
 
-    # Проверка на наличие пропущенных точек
-    has_missing_sn = bool(merged["U_сш_i"].isna().to_numpy().any())
-    has_missing_n = bool(merged["U_ш_i"].isna().to_numpy().any())
-
-    if has_missing_sn or has_missing_n:
+    # Проверка на пропущенные точки
+    if bool(merged["U_сш_i"].isna().to_numpy().any()) or bool(merged["U_ш_i"].isna().to_numpy().any()):
         mask = merged["U_сш_i"].isna() | merged["U_ш_i"].isna()
-        missing_targets: list[Any] = merged.loc[mask, "target"].tolist()
-        raise ValueError(
-            f"Не удалось найти соответствия в файлах для опорных значений: {missing_targets}"
-        )
+        missing = merged.loc[mask, "C"].tolist()
+        raise ValueError(f"В файлах не найдены строки для следующих значений C: {missing}")
 
-    # Физический расчет через numpy для строгой типизации: U_c = sqrt(max(0, U_сш^2 - U_ш^2))
-    u_sn_arr = merged["U_сш_i"].to_numpy(dtype=float)
-    u_n_arr = merged["U_ш_i"].to_numpy(dtype=float)
+    # Расчет: U_c = sqrt(max(0, U_сш^2 - U_ш^2))
+    u_sn = merged["U_сш_i"].to_numpy(dtype=float)
+    u_n = merged["U_ш_i"].to_numpy(dtype=float)
+
+    diff_sq = u_sn**2 - u_n**2
+    u_c = np.sqrt(np.maximum(0.0, diff_sq))
+    merged["U_с_i"] = u_c
+
+    # Плейсхолдеры для x и y
     c_arr = merged["C"].to_numpy(dtype=float)
-    y_arr = merged["Y"].to_numpy(dtype=float)
+    merged["x"] = u_c * (c_arr / 1000.0)
+    merged["y"] = u_c / (c_arr + 1.0)
 
-    diff_squares = u_sn_arr**2 - u_n_arr**2
-    u_c_arr = np.sqrt(np.maximum(0.0, diff_squares))
-    merged["U_с_i"] = u_c_arr
+    # Плейсхолдер скаляра W (случайное или среднее значение)
+    w_val: float = float(np.random.uniform(10.0, 50.0))
 
-    # Плейсхолдеры под будущие формулы для x и y
-    x_arr = u_c_arr * c_arr
-    y_calc_arr = u_c_arr / (y_arr + 1e-9)
+    # Столбец W в таблице
+    merged["W"] = w_val
 
-    merged["x"] = x_arr
-    merged["y"] = y_calc_arr
+    # Итоговый порядок столбцов: i, C, U_сш_i, U_ш_i, U_с_i, x, y, W
+    cols = ["i", "C", "U_сш_i", "U_ш_i", "U_с_i", "x", "y", "W"]
+    final_df = pd.DataFrame(merged[cols].copy())
 
-    # Скалярное значение W (плейсхолдер: среднее по столбцу x)
-    w_val: float = float(x_arr.mean())
-
-    # Формируем итоговый порядок столбцов и округляем значения
-    columns_order = ["i", "C", "Y", "U_сш_i", "U_ш_i", "U_с_i", "x", "y"]
-    final_df = pd.DataFrame(merged[columns_order].copy())
-
-    for col in ["U_сш_i", "U_ш_i", "U_с_i", "x", "y"]:
+    for col in ["U_сш_i", "U_ш_i", "U_с_i", "x", "y", "W"]:
         final_df[col] = final_df[col].round(4)
 
     return final_df, w_val
