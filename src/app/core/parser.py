@@ -1,4 +1,5 @@
 import re
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -10,25 +11,22 @@ def load_spectrum_txt(file_path: Path | str) -> pd.DataFrame:
     Пропускает строки с комментариями (#, [, ().
     Корректно обрабатывает запятые в качестве десятичного разделителя.
     """
-    file_path = Path(file_path)
-    if not file_path.exists():
-        raise FileNotFoundError(f"Файл не найден: {file_path}")
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Файл не найден: {path}")
 
-    cleaned_lines = []
+    cleaned_lines: list[str] = []
     comment_pattern = re.compile(r"^\s*([#\[\(])")
 
-    with open(file_path, encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             stripped = line.strip()
             if not stripped or comment_pattern.match(stripped):
                 continue
-            # Заменяем запятые на точки для дробных чисел
             cleaned_lines.append(stripped.replace(",", "."))
 
     if not cleaned_lines:
-        raise ValueError(f"Файл {file_path.name} не содержит числовых данных.")
-
-    from io import StringIO
+        raise ValueError(f"Файл {path.name} не содержит числовых данных.")
 
     df = pd.read_csv(
         StringIO("\n".join(cleaned_lines)),
@@ -40,6 +38,5 @@ def load_spectrum_txt(file_path: Path | str) -> pd.DataFrame:
         engine="c",
     )
 
-    # Округляем опорный столбец до 4 знаков для устранения погрешностей float
     df["freq"] = df["freq"].round(4)
     return df
