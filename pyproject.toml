@@ -11,3 +11,8 @@ dependencies = [
     "pyinstaller>=6.5.0",
     "numpy>=2.5.3",
 ]
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=3.0.5.260730",
+]

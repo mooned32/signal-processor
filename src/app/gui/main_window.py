@@ -19,19 +19,31 @@ from .table_model import PandasTableModel
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config_path: Path):
+    config_path: Path
+    file_sn_path: Path | None
+    file_n_path: Path | None
+    current_df: pd.DataFrame | None
+    lbl_sn: QLabel
+    lbl_n: QLabel
+    btn_calc: QPushButton
+    table_view: QTableView
+    table_model: PandasTableModel
+    lbl_w: QLabel
+    btn_export: QPushButton
+
+    def __init__(self, config_path: Path) -> None:
         super().__init__()
         self.config_path = config_path
-        self.file_sn_path: Path | None = None
-        self.file_n_path: Path | None = None
-        self.current_df: pd.DataFrame | None = None
+        self.file_sn_path = None
+        self.file_n_path = None
+        self.current_df = None
 
         self.setWindowTitle("Анализатор спектральных сигналов")
         self.resize(850, 600)
 
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
         layout.setSpacing(10)
@@ -40,7 +52,7 @@ class MainWindow(QMainWindow):
         sn_layout = QHBoxLayout()
         self.lbl_sn = QLabel("Файл 1 (Сигнал + Шум): Не выбран")
         btn_sn = QPushButton("Обзор...")
-        btn_sn.clicked.connect(self._select_file_sn)
+        _ = btn_sn.clicked.connect(self._select_file_sn)
         sn_layout.addWidget(self.lbl_sn, stretch=1)
         sn_layout.addWidget(btn_sn)
         layout.addLayout(sn_layout)
@@ -49,7 +61,7 @@ class MainWindow(QMainWindow):
         n_layout = QHBoxLayout()
         self.lbl_n = QLabel("Файл 2 (Шум): Не выбран")
         btn_n = QPushButton("Обзор...")
-        btn_n.clicked.connect(self._select_file_n)
+        _ = btn_n.clicked.connect(self._select_file_n)
         n_layout.addWidget(self.lbl_n, stretch=1)
         n_layout.addWidget(btn_n)
         layout.addLayout(n_layout)
@@ -58,14 +70,18 @@ class MainWindow(QMainWindow):
         self.btn_calc = QPushButton("Рассчитать")
         self.btn_calc.setFixedHeight(35)
         self.btn_calc.setStyleSheet("font-weight: bold;")
-        self.btn_calc.clicked.connect(self._run_calculation)
+        _ = self.btn_calc.clicked.connect(self._run_calculation)
         layout.addWidget(self.btn_calc)
 
         # Таблица результатов
         self.table_view = QTableView()
         self.table_model = PandasTableModel()
         self.table_view.setModel(self.table_model)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        header = self.table_view.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
         layout.addWidget(self.table_view)
 
         # Вывод W и кнопка Экспорта
@@ -75,7 +91,7 @@ class MainWindow(QMainWindow):
 
         self.btn_export = QPushButton("Экспорт в Excel...")
         self.btn_export.setEnabled(False)
-        self.btn_export.clicked.connect(self._export_to_excel)
+        _ = self.btn_export.clicked.connect(self._export_to_excel)
 
         bottom_layout.addWidget(self.lbl_w, stretch=1)
         bottom_layout.addWidget(self.btn_export)
@@ -83,25 +99,25 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(main_widget)
 
-    def _select_file_sn(self):
-        file, _ = QFileDialog.getOpenFileName(
+    def _select_file_sn(self) -> None:
+        file, _filter = QFileDialog.getOpenFileName(
             self, "Выберите файл (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
             self.file_sn_path = Path(file)
             self.lbl_sn.setText(f"Файл 1: {self.file_sn_path.name}")
 
-    def _select_file_n(self):
-        file, _ = QFileDialog.getOpenFileName(
+    def _select_file_n(self) -> None:
+        file, _filter = QFileDialog.getOpenFileName(
             self, "Выберите файл (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
             self.file_n_path = Path(file)
             self.lbl_n.setText(f"Файл 2: {self.file_n_path.name}")
 
-    def _run_calculation(self):
+    def _run_calculation(self) -> None:
         if not self.file_sn_path or not self.file_n_path:
-            QMessageBox.warning(
+            _ = QMessageBox.warning(
                 self, "Предупреждение", "Пожалуйста, выберите оба файла перед расчетом!"
             )
             return
@@ -113,17 +129,17 @@ class MainWindow(QMainWindow):
             self.lbl_w.setText(f"Итоговое значение W: {w:.6f}")
             self.btn_export.setEnabled(True)
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка расчёта", str(e))
+            _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
 
-    def _export_to_excel(self):
+    def _export_to_excel(self) -> None:
         if self.current_df is None:
             return
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _filter = QFileDialog.getSaveFileName(
             self, "Сохранить отчет", "report.xlsx", "Excel Files (*.xlsx)"
         )
         if save_path:
             try:
                 self.current_df.to_excel(save_path, index=False)
-                QMessageBox.information(self, "Успех", f"Файл успешно сохранен:\n{save_path}")
+                _ = QMessageBox.information(self, "Успех", f"Файл успешно сохранен:\n{save_path}")
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка экспорта", str(e))
+                _ = QMessageBox.critical(self, "Ошибка экспорта", str(e))
