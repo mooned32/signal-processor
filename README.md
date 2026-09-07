@@ -38,14 +38,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv sync
 
 # 3. Сборка через PyInstaller в один файл без консольного окна
-uv run pyinstaller --noconfirm --onedir --windowed `
-    --name "SignalProcessor" `
-    --add-data "config.toml;." `
-    src/app/main.py
+uv run pyinstaller --noconfirm --onefile --windowed
+    --name "SignalProcessor"
+    --paths "src" run.py
 ```
-
-*Примечание:* Итоговая папка `dist/SignalProcessor` будет содержать `SignalProcessor.exe` и внешний файл `config.toml`, который можно редактировать без пересборки приложения.
-
-## Интерфейс
-
-![image](.github/assets/ui.png)

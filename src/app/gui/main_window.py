@@ -2,9 +2,8 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
-from openpyxl.styles import Alignment
 import pandas as pd
-from PyQt6.QtCore import Qt
+from openpyxl.styles import Alignment
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -163,6 +162,8 @@ class MainWindow(QMainWindow):
                 merged_cell.alignment = Alignment(horizontal="center", vertical="center")
                 wb.save(save_path)
 
-            _ = QMessageBox.information(self, "Успех", f"Файл успешно сохранен с объединенной ячейкой W:\n{save_path}")
+            _ = QMessageBox.information(
+                self, "Успех", f"Файл успешно сохранен с объединенной ячейкой W:\n{save_path}"
+            )
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка экспорта", str(e))
