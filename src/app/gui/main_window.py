@@ -1,6 +1,10 @@
 from pathlib import Path
+from typing import Any
 
+import openpyxl
+from openpyxl.styles import Alignment
 import pandas as pd
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -39,8 +43,7 @@ class MainWindow(QMainWindow):
         self.current_df = None
 
         self.setWindowTitle("Анализатор спектральных сигналов")
-        self.resize(850, 600)
-
+        self.resize(900, 620)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -84,7 +87,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.table_view)
 
-        # Вывод W и кнопка Экспорта
+        # Подвал
         bottom_layout = QHBoxLayout()
         self.lbl_w = QLabel("Итоговое значение W: —")
         self.lbl_w.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E3A8A;")
@@ -126,7 +129,13 @@ class MainWindow(QMainWindow):
             df, w = calculate_data(self.file_sn_path, self.file_n_path, self.config_path)
             self.current_df = df
             self.table_model.update_data(df)
-            self.lbl_w.setText(f"Итоговое значение W: {w:.6f}")
+
+            # Объединяем ячейку W на все 20 строк таблицы
+            self.table_view.clearSpans()
+            col_w_idx = df.columns.get_loc("W")
+            self.table_view.setSpan(0, col_w_idx, 20, 1)
+
+            self.lbl_w.setText(f"Итоговое значение W: {w:.4f}")
             self.btn_export.setEnabled(True)
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
@@ -137,9 +146,23 @@ class MainWindow(QMainWindow):
         save_path, _filter = QFileDialog.getSaveFileName(
             self, "Сохранить отчет", "report.xlsx", "Excel Files (*.xlsx)"
         )
-        if save_path:
-            try:
-                self.current_df.to_excel(save_path, index=False)
-                _ = QMessageBox.information(self, "Успех", f"Файл успешно сохранен:\n{save_path}")
-            except Exception as e:
-                _ = QMessageBox.critical(self, "Ошибка экспорта", str(e))
+        if not save_path:
+            return
+
+        try:
+            # 1. Сохраняем исходные данные
+            self.current_df.to_excel(save_path, index=False)
+
+            # 2. Объединяем ячейки W в Excel (диапазон H2:H21)
+            wb = openpyxl.load_workbook(save_path)
+            ws = wb.active
+            if ws is not None:
+                # W — 8-й столбец (колонка H), строки со 2 по 21 (строка 1 — заголовки)
+                ws.merge_cells("H2:H21")
+                merged_cell = ws["H2"]
+                merged_cell.alignment = Alignment(horizontal="center", vertical="center")
+                wb.save(save_path)
+
+            _ = QMessageBox.information(self, "Успех", f"Файл успешно сохранен с объединенной ячейкой W:\n{save_path}")
+        except Exception as e:
+            _ = QMessageBox.critical(self, "Ошибка экспорта", str(e))
