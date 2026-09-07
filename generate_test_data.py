@@ -1,6 +1,7 @@
 """Скрипт генерации тестовых спектральных данных (32 000 строк)."""
 
 from pathlib import Path
+
 import numpy as np
 
 

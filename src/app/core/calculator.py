@@ -32,11 +32,13 @@ def calculate_data(
     # Сортируем C по возрастанию и формируем i от 1 до 20
     sorted_c = sorted([int(c) for c in raw_c])
 
-    points_df = pd.DataFrame({
-        "i": np.arange(1, 21, dtype=int),
-        "C": sorted_c,
-        "target_freq": [float(c) for c in sorted_c]
-    })
+    points_df = pd.DataFrame(
+        {
+            "i": np.arange(1, 21, dtype=int),
+            "C": sorted_c,
+            "target_freq": [float(c) for c in sorted_c],
+        }
+    )
 
     # Считываем спектры (32k строк)
     df_sn = load_spectrum_txt(file_sn_path)  # Сигнал + Шум
@@ -54,17 +56,24 @@ def calculate_data(
         tolerance=tolerance_val,
     ).rename(columns={"voltage": "U_сш_i"})
 
-    merged = pd.merge_asof(
-        merged_sn.sort_values("target_freq"),
-        df_n.sort_values("freq"),
-        left_on="target_freq",
-        right_on="freq",
-        direction="nearest",
-        tolerance=tolerance_val,
-    ).rename(columns={"voltage": "U_ш_i"}).sort_values("i").reset_index(drop=True)
+    merged = (
+        pd.merge_asof(
+            merged_sn.sort_values("target_freq"),
+            df_n.sort_values("freq"),
+            left_on="target_freq",
+            right_on="freq",
+            direction="nearest",
+            tolerance=tolerance_val,
+        )
+        .rename(columns={"voltage": "U_ш_i"})
+        .sort_values("i")
+        .reset_index(drop=True)
+    )
 
     # Проверка на пропущенные точки
-    if bool(merged["U_сш_i"].isna().to_numpy().any()) or bool(merged["U_ш_i"].isna().to_numpy().any()):
+    if bool(merged["U_сш_i"].isna().to_numpy().any()) or bool(
+        merged["U_ш_i"].isna().to_numpy().any()
+    ):
         mask = merged["U_сш_i"].isna() | merged["U_ш_i"].isna()
         missing = merged.loc[mask, "C"].tolist()
         raise ValueError(f"В файлах не найдены строки для следующих значений C: {missing}")
