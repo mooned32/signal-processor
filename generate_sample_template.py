@@ -1,15 +1,22 @@
 """Создает пример файла template.docx с форматированием Times New Roman 14 pt."""
 
-import docx
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from docx.styles.style import ParagraphStyle
+from docx.text.run import Run
 
 
 def set_run_font(
-    run: docx.text.run.Run, name: str = "Times New Roman", size: Pt = Pt(14), bold: bool = False
+    run: Run,
+    name: str = "Times New Roman",
+    size: Pt | None = None,
+    bold: bool = False,
 ) -> None:
+    font_size = Pt(14) if size is None else size
     run.font.name = name
-    run.font.size = size
+    run.font.size = font_size
     run.font.bold = bold
     r_pr = run._r.get_or_add_rPr()
     r_fonts = r_pr.get_or_add_rFonts()
@@ -19,16 +26,17 @@ def set_run_font(
 
 
 def make_template() -> None:
-    doc = docx.Document()
+    doc = Document()
 
     # Стиль Normal по умолчанию
     style = doc.styles["Normal"]
-    style.font.name = "Times New Roman"
-    style.font.size = Pt(14)
+    if isinstance(style, ParagraphStyle):
+        style.font.name = "Times New Roman"
+        style.font.size = Pt(14)
 
     # Заголовок
     p_h = doc.add_paragraph()
-    p_h.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+    p_h.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r_h = p_h.add_run("АКТ ПРОВЕРКИ ИСПЫТАНИЙ № {{ ACT_NUMBER }}")
     set_run_font(r_h, size=Pt(16), bold=True)
 
@@ -52,7 +60,7 @@ def make_template() -> None:
     p_body = doc.add_paragraph()
     r_body = p_body.add_run(
         "Настоящий акт составлен по результатам спектрального анализа "
-        "сигналов на контрольных частотах C. Результаты измерений представлены ниже:"
+        + "сигналов на контрольных частотах C. Результаты измерений представлены ниже:"
     )
     set_run_font(r_body)
 
