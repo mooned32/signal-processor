@@ -1,17 +1,20 @@
 from pathlib import Path
-from typing import Any
 
-import openpyxl
 import pandas as pd
-from openpyxl.styles import Alignment
+from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -28,11 +31,13 @@ class MainWindow(QMainWindow):
     current_df: pd.DataFrame | None
     lbl_sn: QLabel
     lbl_n: QLabel
+    input_z: QLineEdit
+    mode_group: QButtonGroup
+    radio_modes: list[QRadioButton]
     btn_calc: QPushButton
     table_view: QTableView
     table_model: PandasTableModel
     lbl_w: QLabel
-    btn_export: QPushButton
 
     def __init__(self, config_path: Path) -> None:
         super().__init__()
@@ -42,7 +47,7 @@ class MainWindow(QMainWindow):
         self.current_df = None
 
         self.setWindowTitle("Анализатор спектральных сигналов")
-        self.resize(900, 620)
+        self.resize(920, 650)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -68,10 +73,40 @@ class MainWindow(QMainWindow):
         n_layout.addWidget(btn_n)
         layout.addLayout(n_layout)
 
+        # Панель параметров
+        params_layout = QHBoxLayout()
+
+        box_modes = QGroupBox("Выбор режима работы")
+        modes_inner = QHBoxLayout(box_modes)
+        self.mode_group = QButtonGroup(self)
+        self.radio_modes = [
+            QRadioButton("Режим 1"),
+            QRadioButton("Режим 2"),
+            QRadioButton("Режим 3"),
+        ]
+        self.radio_modes[0].setChecked(True)
+        for idx, r_btn in enumerate(self.radio_modes):
+            self.mode_group.addButton(r_btn, idx)
+            modes_inner.addWidget(r_btn)
+        params_layout.addWidget(box_modes, stretch=2)
+
+        box_z = QGroupBox("Параметр Z")
+        z_inner = QHBoxLayout(box_z)
+        z_label = QLabel("Значение Z:")
+        self.input_z = QLineEdit("1.0000")
+        validator = QDoubleValidator(-1e9, 1e9, 4, self)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.input_z.setValidator(validator)
+        z_inner.addWidget(z_label)
+        z_inner.addWidget(self.input_z)
+        params_layout.addWidget(box_z, stretch=1)
+
+        layout.addLayout(params_layout)
+
         # Кнопка Расчёта
         self.btn_calc = QPushButton("Рассчитать")
-        self.btn_calc.setFixedHeight(35)
-        self.btn_calc.setStyleSheet("font-weight: bold;")
+        self.btn_calc.setFixedHeight(36)
+        self.btn_calc.setStyleSheet("font-weight: bold; font-size: 13px;")
         _ = self.btn_calc.clicked.connect(self._run_calculation)
         layout.addWidget(self.btn_calc)
 
@@ -90,17 +125,12 @@ class MainWindow(QMainWindow):
         bottom_layout = QHBoxLayout()
         self.lbl_w = QLabel("Итоговое значение W: —")
         self.lbl_w.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E3A8A;")
-
-        self.btn_export = QPushButton("Экспорт в Excel...")
-        self.btn_export.setEnabled(False)
-        _ = self.btn_export.clicked.connect(self._export_to_excel)
-
         bottom_layout.addWidget(self.lbl_w, stretch=1)
-        bottom_layout.addWidget(self.btn_export)
         layout.addLayout(bottom_layout)
 
         self.setCentralWidget(main_widget)
 
+    @pyqtSlot()
     def _select_file_sn(self) -> None:
         file, _filter = QFileDialog.getOpenFileName(
             self, "Выберите файл (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
@@ -109,6 +139,7 @@ class MainWindow(QMainWindow):
             self.file_sn_path = Path(file)
             self.lbl_sn.setText(f"Файл 1: {self.file_sn_path.name}")
 
+    @pyqtSlot()
     def _select_file_n(self) -> None:
         file, _filter = QFileDialog.getOpenFileName(
             self, "Выберите файл (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
@@ -117,6 +148,7 @@ class MainWindow(QMainWindow):
             self.file_n_path = Path(file)
             self.lbl_n.setText(f"Файл 2: {self.file_n_path.name}")
 
+    @pyqtSlot()
     def _run_calculation(self) -> None:
         if not self.file_sn_path or not self.file_n_path:
             _ = QMessageBox.warning(
@@ -124,46 +156,33 @@ class MainWindow(QMainWindow):
             )
             return
 
-        try:
-            df, w = calculate_data(self.file_sn_path, self.file_n_path, self.config_path)
-            self.current_df = df
-            self.table_model.update_data(df)
+        selected_mode = self.mode_group.checkedId()
+        if selected_mode < 0:
+            selected_mode = 0
 
-            # Объединяем ячейку W на все 20 строк таблицы
+        raw_z_text = self.input_z.text().replace(",", ".")
+        try:
+            z_val = float(raw_z_text)
+        except ValueError:
+            _ = QMessageBox.warning(self, "Ошибка ввода", "Некорректное числовое значение для Z!")
+            return
+
+        try:
+            df, w, x_alerts = calculate_data(
+                self.file_sn_path,
+                self.file_n_path,
+                self.config_path,
+                selected_mode,
+                z_val,
+            )
+            self.current_df = df
+            self.table_model.update_data(df, x_alerts)
+
+            # Объединяем ячейку W на 20 строк таблицы
             self.table_view.clearSpans()
-            col_w_idx = df.columns.get_loc("W")
+            col_w_idx: int = list(df.columns).index("W")
             self.table_view.setSpan(0, col_w_idx, 20, 1)
 
             self.lbl_w.setText(f"Итоговое значение W: {w:.4f}")
-            self.btn_export.setEnabled(True)
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
-
-    def _export_to_excel(self) -> None:
-        if self.current_df is None:
-            return
-        save_path, _filter = QFileDialog.getSaveFileName(
-            self, "Сохранить отчет", "report.xlsx", "Excel Files (*.xlsx)"
-        )
-        if not save_path:
-            return
-
-        try:
-            # 1. Сохраняем исходные данные
-            self.current_df.to_excel(save_path, index=False)
-
-            # 2. Объединяем ячейки W в Excel (диапазон H2:H21)
-            wb = openpyxl.load_workbook(save_path)
-            ws = wb.active
-            if ws is not None:
-                # W — 8-й столбец (колонка H), строки со 2 по 21 (строка 1 — заголовки)
-                ws.merge_cells("H2:H21")
-                merged_cell = ws["H2"]
-                merged_cell.alignment = Alignment(horizontal="center", vertical="center")
-                wb.save(save_path)
-
-            _ = QMessageBox.information(
-                self, "Успех", f"Файл успешно сохранен с объединенной ячейкой W:\n{save_path}"
-            )
-        except Exception as e:
-            _ = QMessageBox.critical(self, "Ошибка экспорта", str(e))
