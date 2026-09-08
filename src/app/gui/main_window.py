@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import cast
 
 import pandas as pd
-from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -148,7 +147,6 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(main_widget)
 
-    @pyqtSlot()
     def _select_file_sn(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
@@ -157,7 +155,6 @@ class MainWindow(QMainWindow):
             self.file_sn_path = Path(file)
             self.lbl_sn.setText(f"Файл 1: {self.file_sn_path.name}")
 
-    @pyqtSlot()
     def _select_file_n(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
@@ -166,7 +163,6 @@ class MainWindow(QMainWindow):
             self.file_n_path = Path(file)
             self.lbl_n.setText(f"Файл 2: {self.file_n_path.name}")
 
-    @pyqtSlot()
     def _run_calculation(self) -> None:
         if not self.file_sn_path or not self.file_n_path:
             _ = QMessageBox.warning(
@@ -215,7 +211,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
 
-    @pyqtSlot()
     def _open_report_dialog(self) -> None:
         if self.preview_df is None or self.extended_df is None or self.x_alerts is None:
             return

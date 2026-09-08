@@ -4,8 +4,6 @@ import math
 import random
 from pathlib import Path
 
-import numpy as np
-
 
 def generate_spectrum_files(
     output_dir: Path | None = None,
@@ -19,23 +17,22 @@ def generate_spectrum_files(
 
     freq_floats: list[float] = [float(i) for i in range(1, num_points + 1)]
 
-    # Фоновый шум
-    np.random.seed(42)
-    raw_noise = np.clip(1.5 + 0.3 * np.random.randn(num_points), 0.5, 4.0)
-    noise_floats: list[float] = [float(v) for v in raw_noise]
+    # Генерация шума в чистом Python
+    noise_floats: list[float] = [
+        max(0.5, min(4.0, random.gauss(1.5, 0.3))) for _ in range(num_points)
+    ]
 
     # Сигнал U_с
     signal_floats: list[float] = [
         5.0 + 3.0 * math.sin(2.0 * math.pi * f / 2000.0) for f in freq_floats
     ]
 
-    # Смесь U_сш = sqrt(U_c^2 + U_ш^2) + шум
+    # Смесь U_сш
     sn_floats: list[float] = [
         math.sqrt(s**2 + n**2) + random.gauss(0.0, 0.1)
         for s, n in zip(signal_floats, noise_floats, strict=True)
     ]
 
-    # Запись шума
     noise_lines: list[str] = [
         "# Тестовый спектр: ЧИСТЫЙ ШУМ (U_ш)\n",
         "[Параметры: 32000 строк, шаг 1.0]\n",
@@ -44,7 +41,6 @@ def generate_spectrum_files(
     with open(file_n_path, "w", encoding="utf-8") as f_n:
         f_n.writelines(noise_lines)
 
-    # Запись сигнала с шумом
     sn_lines: list[str] = [
         "# Тестовый спектр: СИГНАЛ + ШУМ (U_сш)\n",
         "[Параметры: 32000 строк, шаг 1.0]\n",
