@@ -21,7 +21,7 @@ $$U_{c\_i} = \sqrt{U_{сш\_i}^2 - U_{ш\_i}^2}$$
 uv sync
 
 # Запуск приложения
-uv run python -m app.main
+uv run --directory "src" python -m app.main
 ```
 
 ---
@@ -38,7 +38,15 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv sync
 
 # 3. Сборка через PyInstaller в один файл без консольного окна
-uv run pyinstaller --noconfirm --onefile --windowed
-    --name "SignalProcessor"
-    --paths "src" run.py
+uv run pyinstaller --noconfirm SignalProcessor.spec
 ```
+
+### Использование скомпилированного приложения:
+
+1. Готовый исполняемый файл находится в папке `dist/SignalProcessor.exe` (установка Python на целевом ПК не требуется).
+2. Для работы программы рядом с `SignalProcessor.exe` должен лежать внешний конфигурационный файл **`config.toml`**:
+   ```text
+   Папка_программы/
+   ├── SignalProcessor.exe
+   └── config.toml
+   ```
