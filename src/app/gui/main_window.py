@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from PyQt6.QtCore import pyqtSlot
@@ -20,15 +22,20 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..core.calculator import calculate_data
+from ..core.calculator import calculate_data, load_config
+from ..core.report_generator import generate_docx_report
 from .table_model import PandasTableModel
+from .template_dialog import TemplateFieldsDialog
 
 
 class MainWindow(QMainWindow):
     config_path: Path
     file_sn_path: Path | None
     file_n_path: Path | None
-    current_df: pd.DataFrame | None
+    preview_df: pd.DataFrame | None
+    extended_df: pd.DataFrame | None
+    x_alerts: list[bool] | None
+    violating_c: list[int]
     lbl_sn: QLabel
     lbl_n: QLabel
     input_z: QLineEdit
@@ -37,17 +44,21 @@ class MainWindow(QMainWindow):
     btn_calc: QPushButton
     table_view: QTableView
     table_model: PandasTableModel
-    lbl_w: QLabel
+    lbl_status: QLabel
+    btn_report: QPushButton
 
     def __init__(self, config_path: Path) -> None:
         super().__init__()
         self.config_path = config_path
         self.file_sn_path = None
         self.file_n_path = None
-        self.current_df = None
+        self.preview_df = None
+        self.extended_df = None
+        self.x_alerts = None
+        self.violating_c = []
 
         self.setWindowTitle("Анализатор спектральных сигналов")
-        self.resize(920, 650)
+        self.resize(920, 680)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -55,7 +66,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(main_widget)
         layout.setSpacing(10)
 
-        # Выбор Файла 1 (Сигнал + Шум)
+        # Выбор Файла 1 и 2
         sn_layout = QHBoxLayout()
         self.lbl_sn = QLabel("Файл 1 (Сигнал + Шум): Не выбран")
         btn_sn = QPushButton("Обзор...")
@@ -64,7 +75,6 @@ class MainWindow(QMainWindow):
         sn_layout.addWidget(btn_sn)
         layout.addLayout(sn_layout)
 
-        # Выбор Файла 2 (Шум)
         n_layout = QHBoxLayout()
         self.lbl_n = QLabel("Файл 2 (Шум): Не выбран")
         btn_n = QPushButton("Обзор...")
@@ -110,7 +120,7 @@ class MainWindow(QMainWindow):
         _ = self.btn_calc.clicked.connect(self._run_calculation)
         layout.addWidget(self.btn_calc)
 
-        # Таблица результатов
+        # Таблица результатов (превью)
         self.table_view = QTableView()
         self.table_model = PandasTableModel()
         self.table_view.setModel(self.table_model)
@@ -121,18 +131,26 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.table_view)
 
-        # Подвал
+        # Подвал: Статус проверки и кнопка отчета
         bottom_layout = QHBoxLayout()
-        self.lbl_w = QLabel("Итоговое значение W: —")
-        self.lbl_w.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E3A8A;")
-        bottom_layout.addWidget(self.lbl_w, stretch=1)
+        self.lbl_status = QLabel("Статус: Ожидание расчёта")
+        self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #4B5563;")
+
+        self.btn_report = QPushButton("Заполнить шаблон и создать отчёт...")
+        self.btn_report.setEnabled(False)
+        self.btn_report.setFixedHeight(34)
+        self.btn_report.setStyleSheet("font-weight: bold; padding: 0 12px;")
+        _ = self.btn_report.clicked.connect(self._open_report_dialog)
+
+        bottom_layout.addWidget(self.lbl_status, stretch=1)
+        bottom_layout.addWidget(self.btn_report)
         layout.addLayout(bottom_layout)
 
         self.setCentralWidget(main_widget)
 
     @pyqtSlot()
     def _select_file_sn(self) -> None:
-        file, _filter = QFileDialog.getOpenFileName(
+        file, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
@@ -141,7 +159,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _select_file_n(self) -> None:
-        file, _filter = QFileDialog.getOpenFileName(
+        file, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
@@ -168,21 +186,93 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            df, w, x_alerts = calculate_data(
+            p_df, e_df, alerts, bad_c = calculate_data(
                 self.file_sn_path,
                 self.file_n_path,
                 self.config_path,
                 selected_mode,
                 z_val,
             )
-            self.current_df = df
-            self.table_model.update_data(df, x_alerts)
+            self.preview_df = p_df
+            self.extended_df = e_df
+            self.x_alerts = alerts
+            self.violating_c = bad_c
 
-            # Объединяем ячейку W на 20 строк таблицы
-            self.table_view.clearSpans()
-            col_w_idx: int = list(df.columns).index("W")
-            self.table_view.setSpan(0, col_w_idx, 20, 1)
+            # Выводим в превью таблицу ДО 'x' включительно
+            self.table_model.update_data(p_df, alerts)
 
-            self.lbl_w.setText(f"Итоговое значение W: {w:.4f}")
+            # Отображаем вердикт
+            if not bad_c:
+                self.lbl_status.setText("При проверке не обнаружено нарушений")
+                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803D;")
+            else:
+                c_str = ", ".join(str(c) for c in bad_c)
+                self.lbl_status.setText(f"Обнаружены нарушения на C: {c_str}")
+                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
+
+            self.btn_report.setEnabled(True)
+
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
+
+    @pyqtSlot()
+    def _open_report_dialog(self) -> None:
+        if self.preview_df is None or self.extended_df is None or self.x_alerts is None:
+            return
+
+        # 1. Читаем секцию [report_fields] из config.toml
+        try:
+            config = load_config(self.config_path)
+            fields_obj = config.get("report_fields", {})
+            fields_dict: dict[str, object] = (
+                cast(dict[str, object], fields_obj) if isinstance(fields_obj, dict) else {}
+            )
+        except Exception as e:
+            _ = QMessageBox.critical(
+                self, "Ошибка конфига", f"Не удалось прочитать поля отчёта: {e}"
+            )
+            return
+
+        dialog = TemplateFieldsDialog(fields_dict, self)
+        if dialog.exec() != TemplateFieldsDialog.DialogCode.Accepted:
+            return
+
+        report_data = dialog.get_data()
+
+        # 2. Имя файла по умолчанию: Акт_№_{ACT_NUMBER}_{DD_MM_YYYY}.docx
+        act_num = report_data.get("ACT_NUMBER", "001")
+        date_str = report_data.get("DATE", datetime.now().strftime("%d_%m_%Y")).replace(".", "_")
+        default_filename = f"Акт_№_{act_num}_{date_str}.docx"
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить акт проверки",
+            default_filename,
+            "Документы Word (*.docx)",
+        )
+        if not save_path:
+            return
+
+        # 3. Путь к шаблону template.docx (рядом с программой/конфигом)
+        template_path = self.config_path.parent / "template.docx"
+        if not template_path.exists():
+            _ = QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Файл шаблона 'template.docx' не найден рядом с программой:\n{template_path}",
+            )
+            return
+
+        try:
+            generate_docx_report(
+                template_path=template_path,
+                output_path=Path(save_path),
+                report_data=report_data,
+                preview_df=self.preview_df,
+                extended_df=self.extended_df,
+                x_alerts=self.x_alerts,
+                violating_c=self.violating_c,
+            )
+            _ = QMessageBox.information(self, "Успех", f"Отчёт успешно сформирован:\n{save_path}")
+        except Exception as e:
+            _ = QMessageBox.critical(self, "Ошибка создания отчёта", str(e))
