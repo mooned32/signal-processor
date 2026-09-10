@@ -1,10 +1,9 @@
 import sys
 from pathlib import Path
 
+from gui.main_window import MainWindow
+from gui.startup_dialog import StartupDialog
 from PyQt6.QtWidgets import QApplication
-
-from app.gui.main_window import MainWindow
-from app.gui.startup_dialog import StartupDialog
 
 
 def get_base_dir() -> Path:

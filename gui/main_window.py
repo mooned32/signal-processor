@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import cast
 
 import pandas as pd
+from core.calculator import calculate_data, load_config
+from core.database import save_measurement_to_db
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -22,8 +24,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..core.calculator import calculate_data, load_config
-from ..core.database import save_measurement_to_db
 from .table_model import PandasTableModel
 
 
