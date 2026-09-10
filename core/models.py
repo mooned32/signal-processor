@@ -23,9 +23,17 @@ class NormParamsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class NormNoiseByLineConfig:
+    symmetrical: list[float]
+    asymmetrical: list[float]
+    power: list[float]
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     frequency_constants: FrequencyConstantsConfig
     norm_params: NormParamsConfig
+    norm_noise_by_line: NormNoiseByLineConfig
     lines: LineConfig
     operation_modes: list[str]
 
