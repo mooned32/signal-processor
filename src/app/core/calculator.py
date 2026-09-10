@@ -1,8 +1,7 @@
-import math
-import secrets
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pandas as pd
 import tomllib
 
@@ -20,57 +19,71 @@ def calculate_data(
     file_sn_path: Path,
     file_n_path: Path,
     config_path: Path,
-    mode_index: int,
-    z_value: float,
-) -> tuple[pd.DataFrame, pd.DataFrame, list[bool], list[int]]:
+    category_index: int,  # 0, 1, или 2 (Категория 1, 2, 3)
+    line_type: str,  # "symmetrical", "asymmetrical", "power"
+    r_param: float | None = None,
+) -> tuple[pd.DataFrame, list[bool], bool]:
     """
-    Выполняет расчет.
+    Векторизованный расчет на NumPy.
     Возвращает:
-      (preview_df, extended_df, x_is_alert, violating_c).
+      (DataFrame со столбцами i, delta_f_i, f_i, U_sn_i, U_n_i, U_s_i, q,
+       список флагов превышения для каждой точки,
+       общий флаг наличия нарушений).
     """
-    _ = z_value
+    _ = r_param
 
     config = load_config(config_path)
-    constants_obj = config.get("constants")
-    constants: dict[str, object] = (
-        cast(dict[str, object], constants_obj) if isinstance(constants_obj, dict) else {}
+
+    # 1. Извлечение констант частот
+    freq_cfg = cast(dict[str, object], config.get("frequency_constants", {}))
+    raw_f_i = cast(list[object], freq_cfg.get("f_i", []))
+    raw_delta_f = cast(list[object], freq_cfg.get("delta_f_i", []))
+    raw_delta_a = cast(list[object], freq_cfg.get("delta_A_i", []))
+
+    if len(raw_f_i) != 20 or len(raw_delta_f) != 20:
+        raise ValueError("В frequency_constants f_i и delta_f_i должны содержать по 20 чисел!")
+
+    f_i_arr = np.array([float(str(x)) for x in raw_f_i], dtype=np.float64)
+    delta_f_arr = np.array([float(str(x)) for x in raw_delta_f], dtype=np.float64)
+    _ = raw_delta_a
+
+    # 2. Нормированные шумы для выбранной линии
+    norm_noise_cfg = cast(dict[str, object], config.get("norm_noise_by_line", {}))
+    line_noise_dict = cast(dict[str, object], norm_noise_cfg.get(line_type, {}))
+    raw_noise_vals = cast(list[object], line_noise_dict.get("values", []))
+    line_norm_noise = (
+        np.array([float(str(x)) for x in raw_noise_vals], dtype=np.float64)
+        if len(raw_noise_vals) == 20
+        else np.zeros(20, dtype=np.float64)
     )
+    _ = line_norm_noise
 
-    raw_c: list[object] = cast(list[object], constants.get("C", []))
-    raw_f: list[object] = cast(list[object], constants.get("F", []))
-    raw_o: list[object] = cast(list[object], constants.get("O", []))
+    # 3. Нормированные параметры по категории
+    norm_cat_cfg = cast(dict[str, object], config.get("norm_params_by_category", {}))
+    delta_stn_list = cast(list[object], norm_cat_cfg.get("delta_stn", []))
+    if len(delta_stn_list) < 3:
+        raise ValueError("В norm_params_by_category.delta_stn должно быть 3 значения!")
+    delta_stn_val = float(str(delta_stn_list[category_index]))
 
-    if len(raw_c) != 20 or len(raw_f) != 20:
-        raise ValueError("В конфиге массивы C и F должны содержать ровно по 20 элементов!")
-    if len(raw_o) != 3:
-        raise ValueError("В конфиге массив O должен содержать 3 элемента!")
-
-    c_vals: list[int] = [int(float(str(c))) for c in raw_c]
-    f_vals: list[float] = [float(str(f)) for f in raw_f]
-    o_vals: list[float] = [float(str(o)) for o in raw_o]
-
-    paired = sorted(zip(c_vals, f_vals, strict=True), key=lambda item: item[0])
-    sorted_c = [p[0] for p in paired]
-    sorted_f = [p[1] for p in paired]
-
-    points_df = pd.DataFrame(
-        {
-            "i": list(range(1, 21)),
-            "C": sorted_c,
-            "F": sorted_f,
-            "freq_key": sorted_c,
-        }
-    )
-
+    # 4. Считывание спектров и сопоставление по f_i
     df_sn = load_spectrum_txt(file_sn_path)
     df_n = load_spectrum_txt(file_n_path)
 
     df_sn["freq_key"] = df_sn["freq"].round().astype(int)
     df_n["freq_key"] = df_n["freq"].round().astype(int)
 
+    points_df = pd.DataFrame(
+        {
+            "i": list(range(1, 21)),
+            "delta_f_i": delta_f_arr,
+            "f_i": f_i_arr,
+            "freq_key": np.rint(f_i_arr).astype(int),
+        }
+    )
+
     merged_sn = pd.merge(
         points_df,
-        df_sn[["freq_key", "voltage"]].rename(columns={"voltage": "U_сш_i"}),
+        df_sn[["freq_key", "voltage"]].rename(columns={"voltage": "U_sn_i"}),
         on="freq_key",
         how="left",
     )
@@ -78,7 +91,7 @@ def calculate_data(
     merged = (
         pd.merge(
             merged_sn,
-            df_n[["freq_key", "voltage"]].rename(columns={"voltage": "U_ш_i"}),
+            df_n[["freq_key", "voltage"]].rename(columns={"voltage": "U_n_i"}),
             on="freq_key",
             how="left",
         )
@@ -86,46 +99,35 @@ def calculate_data(
         .reset_index(drop=True)
     )
 
-    u_sn_series = merged["U_сш_i"]
-    u_n_series = merged["U_ш_i"]
+    if bool(merged["U_sn_i"].isna().to_numpy().any()) or bool(
+        merged["U_n_i"].isna().to_numpy().any()
+    ):
+        missing = merged.loc[merged["U_sn_i"].isna() | merged["U_n_i"].isna(), "f_i"].tolist()
+        raise ValueError(f"Не найдены строки измерений для частот: {missing}")
 
-    if bool(u_sn_series.isna().to_numpy().any()) or bool(u_n_series.isna().to_numpy().any()):
-        mask = u_sn_series.isna() | u_n_series.isna()
-        missing: list[object] = merged.loc[mask, "C"].tolist()
-        raise ValueError(f"В файлах не найдены строки для значений C: {missing}")
+    # 5. Векторизованные расчеты на NumPy
+    u_sn = merged["U_sn_i"].to_numpy(dtype=np.float64)
+    u_n = merged["U_n_i"].to_numpy(dtype=np.float64)
 
-    u_sn_list: list[float] = [float(x) for x in cast(list[object], u_sn_series.tolist())]
-    u_n_list: list[float] = [float(x) for x in cast(list[object], u_n_series.tolist())]
+    # U_s = sqrt(max(0, U_sn^2 - U_n^2))
+    u_s = np.sqrt(np.maximum(0.0, u_sn**2 - u_n**2))
+    merged["U_s_i"] = u_s
 
-    u_c_list: list[float] = [
-        math.sqrt(max(0.0, sn**2 - n**2)) for sn, n in zip(u_sn_list, u_n_list, strict=True)
-    ]
-    merged["U_с_i"] = u_c_list
+    # Формула q (плейсхолдер)
+    euler_e = np.e
+    factor = (2.66 * (euler_e**2.3)) / 5.34
+    q_arr = np.sqrt(np.maximum(0.0, 0.90 + factor * u_s))
+    merged["q"] = q_arr
 
-    factor: float = (2.66 * math.pow(math.e, 2.3)) / 5.34
-    x_vals: list[float] = [math.sqrt(max(0.0, 0.90 + factor * uc)) for uc in u_c_list]
-    merged["x"] = x_vals
+    # Сравнение с дельта_стн
+    violations_arr = q_arr >= delta_stn_val
+    violations_mask: list[bool] = [bool(x) for x in violations_arr]
+    has_violations = bool(np.any(violations_arr))
 
-    threshold_o: float = o_vals[mode_index]
-    x_is_alert: list[bool] = [val >= threshold_o for val in x_vals]
+    cols = ["i", "delta_f_i", "f_i", "U_sn_i", "U_n_i", "U_s_i", "q"]
+    final_df = pd.DataFrame(merged[cols].copy())
 
-    violating_c: list[int] = [c for c, is_bad in zip(sorted_c, x_is_alert, strict=True) if is_bad]
+    for col in ["delta_f_i", "f_i", "U_sn_i", "U_n_i", "U_s_i", "q"]:
+        final_df[col] = final_df[col].round(4)
 
-    f_list: list[float] = [float(x) for x in cast(list[object], merged["F"].tolist())]
-    merged["y"] = [uc / (f + 1e-6) for uc, f in zip(u_c_list, f_list, strict=True)]
-
-    w_val: float = float(secrets.SystemRandom().uniform(10.0, 50.0))
-    merged["W"] = w_val
-
-    preview_cols = ["i", "C", "F", "U_сш_i", "U_ш_i", "U_с_i", "x"]
-    preview_df = pd.DataFrame(merged[preview_cols].copy())
-
-    ext_cols = ["i", "C", "F", "U_сш_i", "U_ш_i", "U_с_i", "x", "y", "W"]
-    extended_df = pd.DataFrame(merged[ext_cols].copy())
-
-    for col in ["F", "U_сш_i", "U_ш_i", "U_с_i", "x"]:
-        preview_df[col] = preview_df[col].round(4)
-    for col in ["F", "U_сш_i", "U_ш_i", "U_с_i", "x", "y", "W"]:
-        extended_df[col] = extended_df[col].round(4)
-
-    return preview_df, extended_df, x_is_alert, violating_c
+    return final_df, violations_mask, has_violations

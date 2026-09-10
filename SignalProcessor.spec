@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT_DIR = Path.cwd()
 
 a = Analysis(
-    ['run.py'],
+    ['src/app/main.py'],
     pathex=[str(ROOT_DIR / 'src')],
     binaries=[],
     datas=[],
@@ -18,7 +18,7 @@ a = Analysis(
         'app.gui',
         'app.gui.main_window',
         'app.gui.table_model',
-        'app.gui.template_dialog',
+        'app.gui.startup_dialog',
         'pandas',
         'numpy',
         'sqlite3',
