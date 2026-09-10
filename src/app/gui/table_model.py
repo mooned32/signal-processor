@@ -7,14 +7,14 @@ from PyQt6.QtGui import QColor
 
 class PandasTableModel(QAbstractTableModel):
     _data: pd.DataFrame
-    _x_alerts: list[bool] | None
-    _x_col_idx: int
+    _alerts: list[bool] | None
+    _q_col_idx: int
 
     def __init__(self, data: pd.DataFrame | None = None) -> None:
         super().__init__()
         self._data = data if data is not None else pd.DataFrame()
-        self._x_alerts = None
-        self._x_col_idx = 6
+        self._alerts = None
+        self._q_col_idx = 6
 
     @override
     def rowCount(self, parent: QModelIndex | None = None) -> int:
@@ -40,9 +40,10 @@ class PandasTableModel(QAbstractTableModel):
         row = index.row()
         col = index.column()
 
+        # Подсветка q красным цветом при нарушении
         if role == Qt.ItemDataRole.BackgroundRole:
-            if col == self._x_col_idx and self._x_alerts is not None:
-                if row < len(self._x_alerts) and self._x_alerts[row]:
+            if col == self._q_col_idx and self._alerts is not None:
+                if row < len(self._alerts) and self._alerts[row]:
                     return QColor(255, 120, 120)
             return None
 
@@ -71,10 +72,10 @@ class PandasTableModel(QAbstractTableModel):
                 return str(section + 1)
         return None
 
-    def update_data(self, new_data: pd.DataFrame, x_alerts: list[bool] | None = None) -> None:
+    def update_data(self, new_data: pd.DataFrame, alerts: list[bool] | None = None) -> None:
         self.beginResetModel()
         self._data = new_data
-        self._x_alerts = x_alerts
-        if "x" in new_data.columns:
-            self._x_col_idx = list(new_data.columns).index("x")
+        self._alerts = alerts
+        if "q" in new_data.columns:
+            self._q_col_idx = list(new_data.columns).index("q")
         self.endResetModel()

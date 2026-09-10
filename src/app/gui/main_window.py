@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -6,7 +5,9 @@ import pandas as pd
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QFileDialog,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -22,134 +23,207 @@ from PyQt6.QtWidgets import (
 )
 
 from ..core.calculator import calculate_data, load_config
-from ..core.report_generator import generate_docx_report
+from ..core.database import save_measurement_to_db
 from .table_model import PandasTableModel
-from .template_dialog import TemplateFieldsDialog
 
 
 class MainWindow(QMainWindow):
     config_path: Path
+    db_path: Path
+    device_name: str
+    category_index: int
+    line_number: int
+
     file_sn_path: Path | None
     file_n_path: Path | None
-    preview_df: pd.DataFrame | None
-    extended_df: pd.DataFrame | None
-    x_alerts: list[bool] | None
-    violating_c: list[int]
+    current_df: pd.DataFrame | None
+    violations_mask: list[bool] | None
+    has_violations: bool
+
+    # UI Widgets
     lbl_sn: QLabel
     lbl_n: QLabel
-    input_z: QLineEdit
-    mode_group: QButtonGroup
-    radio_modes: list[QRadioButton]
+    radio_current: QRadioButton
+    radio_voltage: QRadioButton
+    meas_type_group: QButtonGroup
+    input_r: QLineEdit
+    combo_line: QComboBox
+    input_line_name: QLineEdit
+    combo_mode: QComboBox
     btn_calc: QPushButton
     table_view: QTableView
     table_model: PandasTableModel
     lbl_status: QLabel
-    btn_report: QPushButton
+    btn_save_db: QPushButton
 
-    def __init__(self, config_path: Path) -> None:
+    # Данные линий из конфига: список кортежей (line_type, display_name)
+    line_items: list[tuple[str, str]]
+
+    def __init__(
+        self,
+        config_path: Path,
+        device_name: str,
+        category_index: int,
+    ) -> None:
         super().__init__()
         self.config_path = config_path
+        self.db_path = config_path.parent / "measurements.db"
+        self.device_name = device_name
+        self.category_index = category_index
+        self.line_number = 1
+
         self.file_sn_path = None
         self.file_n_path = None
-        self.preview_df = None
-        self.extended_df = None
-        self.x_alerts = None
-        self.violating_c = []
+        self.current_df = None
+        self.violations_mask = None
+        self.has_violations = False
+        self.line_items = []
 
-        self.setWindowTitle("Анализатор спектральных сигналов")
-        self.resize(920, 680)
+        self._init_line_data()
         self._init_ui()
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        self.setWindowTitle(f"{self.device_name}: линия №{self.line_number}")
+
+    def _init_line_data(self) -> None:
+        """Считывает шаблоны линий из конфига."""
+        try:
+            cfg = load_config(self.config_path)
+            lines_sec = cast(dict[str, object], cfg.get("line", {}))
+            for line_type, sub_val in lines_sec.items():
+                if isinstance(sub_val, dict):
+                    names = cast(list[object], sub_val.get("names", []))
+                    for n in names:
+                        self.line_items.append((line_type, str(n)))
+        except Exception:
+            self.line_items = [("power", "Заземление"), ("symmetrical", "ЛВС, пара {} - {}")]
 
     def _init_ui(self) -> None:
+        self.resize(950, 700)
         main_widget = QWidget()
-        layout = QVBoxLayout(main_widget)
-        layout.setSpacing(10)
+        root_layout = QVBoxLayout(main_widget)
+        root_layout.setSpacing(10)
 
-        # Выбор Файла 1 и 2
-        sn_layout = QHBoxLayout()
-        self.lbl_sn = QLabel("Файл 1 (Сигнал + Шум): Не выбран")
+        # Верхняя панель управления (Сетка по эскизу Plan.svg)
+        controls_box = QGroupBox("Параметры текущего измерения")
+        controls_grid = QGridLayout(controls_box)
+        controls_grid.setSpacing(10)
+
+        # ЛЕВАЯ КОЛОНКА
+        # Файл 1
+        self.lbl_sn = QLabel("Файл 1: Не выбран")
         btn_sn = QPushButton("Обзор...")
+        btn_sn.setFixedWidth(85)
         _ = btn_sn.clicked.connect(self._select_file_sn)
-        sn_layout.addWidget(self.lbl_sn, stretch=1)
-        sn_layout.addWidget(btn_sn)
-        layout.addLayout(sn_layout)
+        controls_grid.addWidget(self.lbl_sn, 0, 0)
+        controls_grid.addWidget(btn_sn, 0, 1)
 
-        n_layout = QHBoxLayout()
-        self.lbl_n = QLabel("Файл 2 (Шум): Не выбран")
+        # Файл 2
+        self.lbl_n = QLabel("Файл 2: Не выбран")
         btn_n = QPushButton("Обзор...")
+        btn_n.setFixedWidth(85)
         _ = btn_n.clicked.connect(self._select_file_n)
-        n_layout.addWidget(self.lbl_n, stretch=1)
-        n_layout.addWidget(btn_n)
-        layout.addLayout(n_layout)
+        controls_grid.addWidget(self.lbl_n, 1, 0)
+        controls_grid.addWidget(btn_n, 1, 1)
 
-        # Панель параметров
-        params_layout = QHBoxLayout()
+        # Ток / Напряжение
+        meas_layout = QHBoxLayout()
+        self.radio_current = QRadioButton("Ток")
+        self.radio_voltage = QRadioButton("Напряжение")
+        self.radio_voltage.setChecked(True)
+        self.meas_type_group = QButtonGroup(self)
+        self.meas_type_group.addButton(self.radio_current, 1)
+        self.meas_type_group.addButton(self.radio_voltage, 2)
+        meas_layout.addWidget(self.radio_current)
+        meas_layout.addWidget(self.radio_voltage)
+        controls_grid.addLayout(meas_layout, 2, 0, 1, 2)
 
-        box_modes = QGroupBox("Выбор режима работы")
-        modes_inner = QHBoxLayout(box_modes)
-        self.mode_group = QButtonGroup(self)
-        self.radio_modes = [
-            QRadioButton("Режим 1"),
-            QRadioButton("Режим 2"),
-            QRadioButton("Режим 3"),
-        ]
-        self.radio_modes[0].setChecked(True)
-        for idx, r_btn in enumerate(self.radio_modes):
-            self.mode_group.addButton(r_btn, idx)
-            modes_inner.addWidget(r_btn)
-        params_layout.addWidget(box_modes, stretch=2)
+        # Параметр R
+        r_layout = QHBoxLayout()
+        r_layout.addWidget(QLabel("Введите параметр R:"))
+        self.input_r = QLineEdit()
+        self.input_r.setPlaceholderText("Ом")
+        r_validator = QDoubleValidator(0.0, 1e9, 4, self)
+        r_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.input_r.setValidator(r_validator)
+        r_layout.addWidget(self.input_r)
+        controls_grid.addLayout(r_layout, 3, 0, 1, 2)
 
-        box_z = QGroupBox("Параметр Z")
-        z_inner = QHBoxLayout(box_z)
-        z_label = QLabel("Значение Z:")
-        self.input_z = QLineEdit("1.0000")
-        validator = QDoubleValidator(-1e9, 1e9, 4, self)
-        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
-        self.input_z.setValidator(validator)
-        z_inner.addWidget(z_label)
-        z_inner.addWidget(self.input_z)
-        params_layout.addWidget(box_z, stretch=1)
+        # ПРАВАЯ КОЛОНКА
+        # Исследуемая линия
+        controls_grid.addWidget(QLabel("Исследуемая линия:"), 0, 2)
+        line_select_box = QHBoxLayout()
+        self.combo_line = QComboBox()
+        for _, name in self.line_items:
+            self.combo_line.addItem(name)
+        _ = self.combo_line.currentIndexChanged.connect(self._on_line_template_changed)
+        line_select_box.addWidget(self.combo_line)
 
-        layout.addLayout(params_layout)
+        self.input_line_name = QLineEdit()
+        if self.line_items:
+            self.input_line_name.setText(self.line_items[0][1])
+        line_select_box.addWidget(self.input_line_name)
+        controls_grid.addLayout(line_select_box, 0, 3)
 
-        # Кнопка Расчёта
+        # Режим работы
+        controls_grid.addWidget(QLabel("Режим работы:"), 1, 2)
+        self.combo_mode = QComboBox()
+        try:
+            cfg = load_config(self.config_path)
+            modes_sec = cast(dict[str, object], cfg.get("operation_modes", {}))
+            modes = cast(list[object], modes_sec.get("modes", ["ХХ", "ДР", "РР"]))
+            self.combo_mode.addItems([str(m) for m in modes])
+        except Exception:
+            self.combo_mode.addItems(["ХХ", "ДР", "РР"])
+        controls_grid.addWidget(self.combo_mode, 1, 3)
+
+        # Кнопка Рассчитать
         self.btn_calc = QPushButton("Рассчитать")
-        self.btn_calc.setFixedHeight(36)
-        self.btn_calc.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self.btn_calc.setFixedHeight(38)
+        self.btn_calc.setStyleSheet(
+            "font-weight: bold; font-size: 13px; background-color: #E2E8F0;"
+        )
         _ = self.btn_calc.clicked.connect(self._run_calculation)
-        layout.addWidget(self.btn_calc)
+        controls_grid.addWidget(self.btn_calc, 2, 2, 2, 2)
 
-        # Таблица результатов (превью)
+        root_layout.addWidget(controls_box)
+
+        # Таблица результатов
         self.table_view = QTableView()
         self.table_model = PandasTableModel()
         self.table_view.setModel(self.table_model)
-
         header = self.table_view.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        root_layout.addWidget(self.table_view)
 
-        layout.addWidget(self.table_view)
-
-        # Подвал: Статус проверки и кнопка отчета
+        # Подвал (Статус и кнопка Внести в БД)
         bottom_layout = QHBoxLayout()
         self.lbl_status = QLabel("Статус: Ожидание расчёта")
         self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #4B5563;")
 
-        self.btn_report = QPushButton("Заполнить шаблон и создать отчёт...")
-        self.btn_report.setEnabled(False)
-        self.btn_report.setFixedHeight(34)
-        self.btn_report.setStyleSheet("font-weight: bold; padding: 0 12px;")
-        _ = self.btn_report.clicked.connect(self._open_report_dialog)
+        self.btn_save_db = QPushButton("Внести данные в БД")
+        self.btn_save_db.setEnabled(False)
+        self.btn_save_db.setFixedHeight(36)
+        self.btn_save_db.setStyleSheet(
+            "font-weight: bold; background-color: #10B981; color: white; padding: 0 16px;"
+        )
+        _ = self.btn_save_db.clicked.connect(self._save_to_database)
 
         bottom_layout.addWidget(self.lbl_status, stretch=1)
-        bottom_layout.addWidget(self.btn_report)
-        layout.addLayout(bottom_layout)
+        bottom_layout.addWidget(self.btn_save_db)
+        root_layout.addLayout(bottom_layout)
 
         self.setCentralWidget(main_widget)
 
+    def _on_line_template_changed(self, idx: int) -> None:
+        if 0 <= idx < len(self.line_items):
+            self.input_line_name.setText(self.line_items[idx][1])
+
     def _select_file_sn(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
+            self, "Выберите файл 1 (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
             self.file_sn_path = Path(file)
@@ -157,7 +231,7 @@ class MainWindow(QMainWindow):
 
     def _select_file_n(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
+            self, "Выберите файл 2 (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
         )
         if file:
             self.file_n_path = Path(file)
@@ -165,109 +239,101 @@ class MainWindow(QMainWindow):
 
     def _run_calculation(self) -> None:
         if not self.file_sn_path or not self.file_n_path:
-            _ = QMessageBox.warning(
-                self, "Предупреждение", "Пожалуйста, выберите оба файла перед расчетом!"
-            )
+            _ = QMessageBox.warning(self, "Предупреждение", "Пожалуйста, выберите оба файла!")
             return
 
-        selected_mode = self.mode_group.checkedId()
-        if selected_mode < 0:
-            selected_mode = 0
+        idx = self.combo_line.currentIndex()
+        line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
 
-        raw_z_text = self.input_z.text().replace(",", ".")
-        try:
-            z_val = float(raw_z_text)
-        except ValueError:
-            _ = QMessageBox.warning(self, "Ошибка ввода", "Некорректное числовое значение для Z!")
-            return
+        r_val = None
+        if self.input_r.text().strip():
+            try:
+                r_val = float(self.input_r.text().replace(",", "."))
+            except ValueError:
+                pass
 
         try:
-            p_df, e_df, alerts, bad_c = calculate_data(
-                self.file_sn_path,
-                self.file_n_path,
-                self.config_path,
-                selected_mode,
-                z_val,
+            df, mask, violations = calculate_data(
+                file_sn_path=self.file_sn_path,
+                file_n_path=self.file_n_path,
+                config_path=self.config_path,
+                category_index=self.category_index,
+                line_type=line_type,
+                r_param=r_val,
             )
-            self.preview_df = p_df
-            self.extended_df = e_df
-            self.x_alerts = alerts
-            self.violating_c = bad_c
+            self.current_df = df
+            self.violations_mask = mask
+            self.has_violations = violations
 
-            # Выводим в превью таблицу ДО 'x' включительно
-            self.table_model.update_data(p_df, alerts)
+            self.table_model.update_data(df, mask)
 
-            # Отображаем вердикт
-            if not bad_c:
-                self.lbl_status.setText("При проверке не обнаружено нарушений")
-                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803D;")
-            else:
-                c_str = ", ".join(str(c) for c in bad_c)
-                self.lbl_status.setText(f"Обнаружены нарушения на C: {c_str}")
+            if violations:
+                self.lbl_status.setText("1. Обнаружены нарушения: Подтверждено АЭП")
                 self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
+            else:
+                self.lbl_status.setText("2. Нарушения не обнаружены: Не подтверждено АЭП")
+                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803D;")
 
-            self.btn_report.setEnabled(True)
+            self.btn_save_db.setEnabled(True)
 
         except Exception as e:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
 
-    def _open_report_dialog(self) -> None:
-        if self.preview_df is None or self.extended_df is None or self.x_alerts is None:
+    def _save_to_database(self) -> None:
+        if self.current_df is None or self.violations_mask is None:
             return
 
-        # 1. Читаем секцию [report_fields] из config.toml
+        idx = self.combo_line.currentIndex()
+        line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
+        line_display_name = self.input_line_name.text().strip() or self.combo_line.currentText()
+        operation_mode = self.combo_mode.currentText()
+        meas_type = self.meas_type_group.checkedId()  # 1: Ток, 2: Напряжение
+
+        r_val = None
+        if self.input_r.text().strip():
+            try:
+                r_val = float(self.input_r.text().replace(",", "."))
+            except ValueError:
+                pass
+
         try:
-            config = load_config(self.config_path)
-            fields_obj = config.get("report_fields", {})
-            fields_dict: dict[str, object] = (
-                cast(dict[str, object], fields_obj) if isinstance(fields_obj, dict) else {}
+            _ = save_measurement_to_db(
+                db_path=self.db_path,
+                device_name=self.device_name,
+                category=self.category_index + 1,
+                line_number=self.line_number,
+                line_name=line_display_name,
+                line_type=line_type,
+                operation_mode=operation_mode,
+                measurement_type=meas_type,
+                parameter_r=r_val,
+                has_violations=self.has_violations,
+                df_points=self.current_df,
+                violations_mask=self.violations_mask,
             )
-        except Exception as e:
-            _ = QMessageBox.critical(
-                self, "Ошибка конфига", f"Не удалось прочитать поля отчёта: {e}"
-            )
-            return
 
-        dialog = TemplateFieldsDialog(fields_dict, self)
-        if dialog.exec() != TemplateFieldsDialog.DialogCode.Accepted:
-            return
-
-        report_data = dialog.get_data()
-
-        # 2. Имя файла по умолчанию: Акт_№_{ACT_NUMBER}_{DD_MM_YYYY}.docx
-        act_num = report_data.get("ACT_NUMBER", "001")
-        date_str = report_data.get("DATE", datetime.now().strftime("%d_%m_%Y")).replace(".", "_")
-        default_filename = f"Акт_№_{act_num}_{date_str}.docx"
-
-        save_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Сохранить акт проверки",
-            default_filename,
-            "Документы Word (*.docx)",
-        )
-        if not save_path:
-            return
-
-        # 3. Путь к шаблону template.docx (рядом с программой/конфигом)
-        template_path = self.config_path.parent / "template.docx"
-        if not template_path.exists():
-            _ = QMessageBox.critical(
+            _ = QMessageBox.information(
                 self,
-                "Ошибка",
-                f"Файл шаблона 'template.docx' не найден рядом с программой:\n{template_path}",
+                "Успех",
+                f"Измерение для линии №{self.line_number} успешно занесено в базу данных!",
             )
-            return
 
-        try:
-            generate_docx_report(
-                template_path=template_path,
-                output_path=Path(save_path),
-                report_data=report_data,
-                preview_df=self.preview_df,
-                extended_df=self.extended_df,
-                x_alerts=self.x_alerts,
-                violating_c=self.violating_c,
-            )
-            _ = QMessageBox.information(self, "Успех", f"Отчёт успешно сформирован:\n{save_path}")
+            # Сброс полей по схеме Plan.svg
+            self.file_sn_path = None
+            self.file_n_path = None
+            self.lbl_sn.setText("Файл 1: Не выбран")
+            self.lbl_n.setText("Файл 2: Не выбран")
+            self.input_r.clear()
+            self.current_df = None
+            self.violations_mask = None
+            self.table_model.update_data(pd.DataFrame(), None)
+            self.lbl_status.setText("Статус: Ожидание расчёта")
+            self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #4B5563;")
+            self.btn_save_db.setEnabled(False)
+
+            # Инкремент линии N + 1
+            self.line_number += 1
+            self._update_window_title()
+
         except Exception as e:
-            _ = QMessageBox.critical(self, "Ошибка создания отчёта", str(e))
+            _ = QMessageBox.critical(self, "Ошибка сохранения в БД", str(e))
