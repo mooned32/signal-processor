@@ -9,8 +9,26 @@ from gui.startup_dialog import StartupDialog
 
 
 def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
+    """
+    Возвращает директорию расположения исполняемого файла или скрипта.
+    Учитывает различия Nuitka (--onefile через sys.argv[0]), PyInstaller и dev-режима.
+    """
+    # Проверка запуска в скомпилированном виде (Nuitka или PyInstaller)
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        if sys.argv and sys.argv[0]:
+            candidate = Path(sys.argv[0]).resolve().parent
+            if (candidate / "config.toml").exists():
+                return candidate
+
+            exec_dir = Path(sys.executable).resolve().parent
+            if (exec_dir / "config.toml").exists():
+                return exec_dir
+
+            return candidate
+
         return Path(sys.executable).resolve().parent
+
+    # Запуск из исходников в среде разработки
     return Path(__file__).resolve().parent
 
 

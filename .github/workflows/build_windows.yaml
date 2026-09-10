@@ -2,7 +2,7 @@ name: Build Windows Executable
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch: # Позволяет запускать сборку вручную кнопкой в интерфейсе GitHub
 
 jobs:
@@ -27,6 +27,7 @@ jobs:
       - name: Build with Nuitka
         run: |
           uv run --group build python -m nuitka `
+            --assume-yes-for-downloads `
             --standalone `
             --onefile `
             --enable-plugin=pyqt6 `
