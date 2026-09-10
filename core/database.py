@@ -1,15 +1,13 @@
 import sqlite3
 from pathlib import Path
-from typing import cast
 
-import pandas as pd
+from .models import MeasurementPoint
 
 
 def init_database(db_path: Path) -> None:
-    """Инициализирует таблицы базы данных SQLite."""
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        _ = cursor.execute("""
             CREATE TABLE IF NOT EXISTS measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_name TEXT NOT NULL,
@@ -18,13 +16,13 @@ def init_database(db_path: Path) -> None:
                 line_name TEXT NOT NULL,
                 line_type TEXT NOT NULL,
                 operation_mode TEXT NOT NULL,
-                measurement_type INTEGER NOT NULL, -- 1: Ток, 2: Напряжение
+                measurement_type INTEGER NOT NULL,
                 parameter_r REAL,
-                has_violations INTEGER NOT NULL,    -- 1 или 0
+                has_violations INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cursor.execute("""
+        _ = cursor.execute("""
             CREATE TABLE IF NOT EXISTS measurement_points (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 measurement_id INTEGER NOT NULL,
@@ -53,15 +51,13 @@ def save_measurement_to_db(
     measurement_type: int,
     parameter_r: float | None,
     has_violations: bool,
-    df_points: pd.DataFrame,
-    violations_mask: list[bool],
+    points: list[MeasurementPoint],
 ) -> int:
-    """Сохраняет измерение линии и 20 расчетных точек в SQLite."""
     init_database(db_path)
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        _ = cursor.execute(
             """
             INSERT INTO measurements (
                 device_name, category, line_number, line_name, line_type,
@@ -80,35 +76,26 @@ def save_measurement_to_db(
                 1 if has_violations else 0,
             ),
         )
-        measurement_id = cast(int, cursor.lastrowid)
+        if cursor.lastrowid is None:
+            raise RuntimeError("Не удалось получить идентификатор созданной записи.")
+        measurement_id: int = cursor.lastrowid
 
-        # Сохранение точек
-        rows_to_insert: list[tuple[int, int, float, float, float, float, float, float, int]] = []
-        for idx in range(len(df_points)):
-            p_i = int(df_points["i"].iloc[idx])
-            df_val = float(df_points["delta_f_i"].iloc[idx])
-            f_val = float(df_points["f_i"].iloc[idx])
-            u_sn = float(df_points["U_sn_i"].iloc[idx])
-            u_n = float(df_points["U_n_i"].iloc[idx])
-            u_s = float(df_points["U_s_i"].iloc[idx])
-            q_val = float(df_points["q"].iloc[idx])
-            is_bad = 1 if idx < len(violations_mask) and violations_mask[idx] else 0
-
-            rows_to_insert.append(
-                (
-                    measurement_id,
-                    p_i,
-                    df_val,
-                    f_val,
-                    u_sn,
-                    u_n,
-                    u_s,
-                    q_val,
-                    is_bad,
-                )
+        rows_to_insert = [
+            (
+                measurement_id,
+                p.index,
+                p.delta_f,
+                p.f,
+                p.u_sn,
+                p.u_n,
+                p.u_s,
+                p.q,
+                1 if p.is_violation else 0,
             )
+            for p in points
+        ]
 
-        cursor.executemany(
+        _ = cursor.executemany(
             """
             INSERT INTO measurement_points (
                 measurement_id, point_index, delta_f, f, u_sn, u_n, u_s, q, is_violation

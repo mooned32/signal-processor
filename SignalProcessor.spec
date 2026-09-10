@@ -17,6 +17,7 @@ a = Analysis(
         'gui.main_window',
         'gui.table_model',
         'gui.startup_dialog',
+        'gui.line_template_widget',
         'pandas',
         'numpy',
         'sqlite3',

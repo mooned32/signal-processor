@@ -1,15 +1,13 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Protocol
 
-import pandas as pd
-from core.calculator import calculate_data, load_config
-from core.database import save_measurement_to_db
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFileDialog,
-    QGridLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -24,7 +22,28 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .table_model import PandasTableModel
+from core.calculator import calculate_data, load_config
+from core.database import save_measurement_to_db
+from core.models import AppConfig, CalculationResult
+
+from .line_template_widget import LineTemplateWidget
+from .table_model import MeasurementTableModel, TableGridDelegate
+
+
+class VoidSignal(Protocol):
+    def connect(self, slot: Callable[[], None], /) -> object: ...
+
+
+class IntSignal(Protocol):
+    def connect(self, slot: Callable[[int], None], /) -> object: ...
+
+
+def connect_action(signal: VoidSignal, slot: Callable[[], None]) -> None:
+    _ = signal.connect(slot)
+
+
+def connect_index(signal: IntSignal, slot: Callable[[int], None]) -> None:
+    _ = signal.connect(slot)
 
 
 class MainWindow(QMainWindow):
@@ -36,27 +55,24 @@ class MainWindow(QMainWindow):
 
     file_sn_path: Path | None
     file_n_path: Path | None
-    current_df: pd.DataFrame | None
-    violations_mask: list[bool] | None
-    has_violations: bool
+    calc_result: CalculationResult | None
 
-    # UI Widgets
-    lbl_sn: QLabel
-    lbl_n: QLabel
+    input_file_sn: QLineEdit
+    input_file_n: QLineEdit
     radio_current: QRadioButton
     radio_voltage: QRadioButton
     meas_type_group: QButtonGroup
     input_r: QLineEdit
     combo_line: QComboBox
-    input_line_name: QLineEdit
+    line_template_widget: LineTemplateWidget
     combo_mode: QComboBox
     btn_calc: QPushButton
     table_view: QTableView
-    table_model: PandasTableModel
+    table_model: MeasurementTableModel
     lbl_status: QLabel
+    status_card: QFrame
     btn_save_db: QPushButton
 
-    # Данные линий из конфига: список кортежей (line_type, display_name)
     line_items: list[tuple[str, str]]
 
     def __init__(
@@ -74,186 +90,286 @@ class MainWindow(QMainWindow):
 
         self.file_sn_path = None
         self.file_n_path = None
-        self.current_df = None
-        self.violations_mask = None
-        self.has_violations = False
+        self.calc_result = None
         self.line_items = []
 
-        self._init_line_data()
+        self.input_file_sn = QLineEdit()
+        self.input_file_n = QLineEdit()
+        self.radio_current = QRadioButton("Ток")
+        self.radio_voltage = QRadioButton("Напряжение")
+        self.meas_type_group = QButtonGroup(self)
+        self.input_r = QLineEdit()
+        self.combo_line = QComboBox()
+        self.line_template_widget = LineTemplateWidget()
+        self.combo_mode = QComboBox()
+        self.btn_calc = QPushButton("Рассчитать параметры")
+        self.table_view = QTableView()
+        self.table_model = MeasurementTableModel()
+        self.lbl_status = QLabel("Ожидание запуска расчёта")
+        self.status_card = QFrame()
+        self.btn_save_db = QPushButton("Сохранить измерение")
+
+        self._load_line_templates()
         self._init_ui()
         self._update_window_title()
 
     def _update_window_title(self) -> None:
-        self.setWindowTitle(f"{self.device_name}: линия №{self.line_number}")
+        self.setWindowTitle(f"Анализ спектров — {self.device_name} (Линия №{self.line_number})")
 
-    def _init_line_data(self) -> None:
-        """Считывает шаблоны линий из конфига."""
+    def _load_line_templates(self) -> None:
         try:
-            cfg = load_config(self.config_path)
-            lines_sec = cast(dict[str, object], cfg.get("line", {}))
-            for line_type, sub_val in lines_sec.items():
-                if isinstance(sub_val, dict):
-                    names = cast(list[object], sub_val.get("names", []))
-                    for n in names:
-                        self.line_items.append((line_type, str(n)))
-        except Exception:
-            self.line_items = [("power", "Заземление"), ("symmetrical", "ЛВС, пара {} - {}")]
+            cfg: AppConfig = load_config(self.config_path)
+            for name in cfg.lines.symmetrical:
+                self.line_items.append(("symmetrical", name))
+            for name in cfg.lines.asymmetrical:
+                self.line_items.append(("asymmetrical", name))
+            for name in cfg.lines.power:
+                self.line_items.append(("power", name))
+        except (FileNotFoundError, OSError, ValueError):
+            self.line_items = [
+                ("power", "Заземление"),
+                ("symmetrical", "ЛВС, пара  {} - {}"),
+            ]
 
     def _init_ui(self) -> None:
-        self.resize(950, 700)
+        self.resize(1080, 780)
+        self.setMinimumSize(980, 720)
+
         main_widget = QWidget()
         root_layout = QVBoxLayout(main_widget)
+        root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.setSpacing(10)
 
-        # Верхняя панель управления (Сетка по эскизу Plan.svg)
-        controls_box = QGroupBox("Параметры текущего измерения")
-        controls_grid = QGridLayout(controls_box)
-        controls_grid.setSpacing(10)
+        top_cards_layout = QHBoxLayout()
+        top_cards_layout.setSpacing(10)
+        top_cards_layout.addWidget(self._create_input_files_card(), stretch=5)
+        top_cards_layout.addWidget(self._create_line_control_card(), stretch=5)
+        root_layout.addLayout(top_cards_layout)
 
-        # ЛЕВАЯ КОЛОНКА
-        # Файл 1
-        self.lbl_sn = QLabel("Файл 1: Не выбран")
-        btn_sn = QPushButton("Обзор...")
-        btn_sn.setFixedWidth(85)
-        _ = btn_sn.clicked.connect(self._select_file_sn)
-        controls_grid.addWidget(self.lbl_sn, 0, 0)
-        controls_grid.addWidget(btn_sn, 0, 1)
-
-        # Файл 2
-        self.lbl_n = QLabel("Файл 2: Не выбран")
-        btn_n = QPushButton("Обзор...")
-        btn_n.setFixedWidth(85)
-        _ = btn_n.clicked.connect(self._select_file_n)
-        controls_grid.addWidget(self.lbl_n, 1, 0)
-        controls_grid.addWidget(btn_n, 1, 1)
-
-        # Ток / Напряжение
-        meas_layout = QHBoxLayout()
-        self.radio_current = QRadioButton("Ток")
-        self.radio_voltage = QRadioButton("Напряжение")
-        self.radio_voltage.setChecked(True)
-        self.meas_type_group = QButtonGroup(self)
-        self.meas_type_group.addButton(self.radio_current, 1)
-        self.meas_type_group.addButton(self.radio_voltage, 2)
-        meas_layout.addWidget(self.radio_current)
-        meas_layout.addWidget(self.radio_voltage)
-        controls_grid.addLayout(meas_layout, 2, 0, 1, 2)
-
-        # Параметр R
-        r_layout = QHBoxLayout()
-        r_layout.addWidget(QLabel("Введите параметр R:"))
-        self.input_r = QLineEdit()
-        self.input_r.setPlaceholderText("Ом")
-        r_validator = QDoubleValidator(0.0, 1e9, 4, self)
-        r_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
-        self.input_r.setValidator(r_validator)
-        r_layout.addWidget(self.input_r)
-        controls_grid.addLayout(r_layout, 3, 0, 1, 2)
-
-        # ПРАВАЯ КОЛОНКА
-        # Исследуемая линия
-        controls_grid.addWidget(QLabel("Исследуемая линия:"), 0, 2)
-        line_select_box = QHBoxLayout()
-        self.combo_line = QComboBox()
-        for _, name in self.line_items:
-            self.combo_line.addItem(name)
-        _ = self.combo_line.currentIndexChanged.connect(self._on_line_template_changed)
-        line_select_box.addWidget(self.combo_line)
-
-        self.input_line_name = QLineEdit()
-        if self.line_items:
-            self.input_line_name.setText(self.line_items[0][1])
-        line_select_box.addWidget(self.input_line_name)
-        controls_grid.addLayout(line_select_box, 0, 3)
-
-        # Режим работы
-        controls_grid.addWidget(QLabel("Режим работы:"), 1, 2)
-        self.combo_mode = QComboBox()
-        try:
-            cfg = load_config(self.config_path)
-            modes_sec = cast(dict[str, object], cfg.get("operation_modes", {}))
-            modes = cast(list[object], modes_sec.get("modes", ["ХХ", "ДР", "РР"]))
-            self.combo_mode.addItems([str(m) for m in modes])
-        except Exception:
-            self.combo_mode.addItems(["ХХ", "ДР", "РР"])
-        controls_grid.addWidget(self.combo_mode, 1, 3)
-
-        # Кнопка Рассчитать
-        self.btn_calc = QPushButton("Рассчитать")
-        self.btn_calc.setFixedHeight(38)
-        self.btn_calc.setStyleSheet(
-            "font-weight: bold; font-size: 13px; background-color: #E2E8F0;"
-        )
-        _ = self.btn_calc.clicked.connect(self._run_calculation)
-        controls_grid.addWidget(self.btn_calc, 2, 2, 2, 2)
-
-        root_layout.addWidget(controls_box)
-
-        # Таблица результатов
-        self.table_view = QTableView()
-        self.table_model = PandasTableModel()
-        self.table_view.setModel(self.table_model)
-        header = self.table_view.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        root_layout.addWidget(self.table_view)
-
-        # Подвал (Статус и кнопка Внести в БД)
-        bottom_layout = QHBoxLayout()
-        self.lbl_status = QLabel("Статус: Ожидание расчёта")
-        self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #4B5563;")
-
-        self.btn_save_db = QPushButton("Внести данные в БД")
-        self.btn_save_db.setEnabled(False)
-        self.btn_save_db.setFixedHeight(36)
-        self.btn_save_db.setStyleSheet(
-            "font-weight: bold; background-color: #10B981; color: white; padding: 0 16px;"
-        )
-        _ = self.btn_save_db.clicked.connect(self._save_to_database)
-
-        bottom_layout.addWidget(self.lbl_status, stretch=1)
-        bottom_layout.addWidget(self.btn_save_db)
-        root_layout.addLayout(bottom_layout)
+        root_layout.addWidget(self._create_table_view(), stretch=1)
+        root_layout.addLayout(self._create_bottom_bar())
 
         self.setCentralWidget(main_widget)
 
+    def _create_input_files_card(self) -> QGroupBox:
+        box = QGroupBox("Входные спектры и датчик")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
+
+        layout.addWidget(QLabel("Спектр смеси «Сигнал + Шум» (U_сш):"))
+        sn_row = QHBoxLayout()
+        self.input_file_sn.setReadOnly(True)
+        self.input_file_sn.setPlaceholderText("Файл не выбран...")
+        btn_sn = QPushButton("Обзор...")
+        btn_sn.setFixedWidth(75)
+        connect_action(btn_sn.clicked, self._select_file_sn)
+        sn_row.addWidget(self.input_file_sn)
+        sn_row.addWidget(btn_sn)
+        layout.addLayout(sn_row)
+
+        layout.addWidget(QLabel("Спектр собственного шума (U_ш):"))
+        n_row = QHBoxLayout()
+        self.input_file_n.setReadOnly(True)
+        self.input_file_n.setPlaceholderText("Файл не выбран...")
+        btn_n = QPushButton("Обзор...")
+        btn_n.setFixedWidth(75)
+        connect_action(btn_n.clicked, self._select_file_n)
+        n_row.addWidget(self.input_file_n)
+        n_row.addWidget(btn_n)
+        layout.addLayout(n_row)
+
+        row_params = QHBoxLayout()
+        row_params.setSpacing(12)
+
+        meas_type_box = QHBoxLayout()
+        meas_type_box.addWidget(QLabel("Величина:"))
+        self.radio_voltage.setChecked(True)
+        self.meas_type_group.addButton(self.radio_current, 1)
+        self.meas_type_group.addButton(self.radio_voltage, 2)
+        meas_type_box.addWidget(self.radio_voltage)
+        meas_type_box.addWidget(self.radio_current)
+        row_params.addLayout(meas_type_box)
+
+        r_box = QHBoxLayout()
+        r_box.addWidget(QLabel("Сопротивление R:"))
+        self.input_r.setPlaceholderText("—")
+        self.input_r.setFixedWidth(55)
+        r_validator = QDoubleValidator(0.0, 1e9, 4, self)
+        r_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.input_r.setValidator(r_validator)
+        r_box.addWidget(self.input_r)
+        r_box.addWidget(QLabel("Ом"))
+        row_params.addLayout(r_box)
+
+        row_params.addStretch()
+        layout.addLayout(row_params)
+        return box
+
+    def _create_line_control_card(self) -> QGroupBox:
+        box = QGroupBox("Параметры линии и расчёт")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Исследуемая линия:"))
+        line_row = QHBoxLayout()
+        for _, name in self.line_items:
+            self.combo_line.addItem(name)
+        connect_index(self.combo_line.currentIndexChanged, self._on_line_template_changed)
+        self.combo_line.setMinimumWidth(160)
+        line_row.addWidget(self.combo_line)
+
+        line_row.addWidget(self.line_template_widget, stretch=1)
+        layout.addLayout(line_row)
+
+        if self.line_items:
+            self.line_template_widget.set_template(self.line_items[0][1])
+
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Режим работы:"))
+        self.combo_mode.setFixedWidth(90)
+        self._load_operation_modes()
+        mode_row.addWidget(self.combo_mode)
+        mode_row.addStretch()
+        layout.addLayout(mode_row)
+
+        layout.addStretch()
+
+        self.btn_calc.setFixedHeight(34)
+        self.btn_calc.setStyleSheet(
+            "QPushButton { font-size: 12px; font-weight: 500; background-color: #0F6CBD; "
+            + "color: white; border: none; border-radius: 4px; } "
+            + "QPushButton:hover { background-color: #0D5A9B; } "
+            + "QPushButton:pressed { background-color: #0B487B; }"
+        )
+        connect_action(self.btn_calc.clicked, self._run_calculation)
+        layout.addWidget(self.btn_calc)
+
+        return box
+
+    def _load_operation_modes(self) -> None:
+        mode_list: list[str] = ["ХХ", "ДР", "РР"]
+        try:
+            cfg: AppConfig = load_config(self.config_path)
+            mode_list = cfg.operation_modes
+        except (FileNotFoundError, OSError, ValueError):
+            mode_list = ["ХХ", "ДР", "РР"]
+
+        for m in mode_list:
+            self.combo_mode.addItem(m)
+
+    def _create_table_view(self) -> QTableView:
+        self.table_view.setModel(self.table_model)
+        self.table_view.setItemDelegate(TableGridDelegate(self.table_view))
+        self.table_view.setShowGrid(False)
+
+        v_header = self.table_view.verticalHeader()
+        if v_header is not None:
+            v_header.setVisible(False)
+            v_header.setDefaultSectionSize(23)
+
+        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setStyleSheet(
+            "QTableView { border: 1px solid #CBD5E1; alternate-background-color: #F8FAFC; "
+            + "selection-background-color: #E2E8F0; selection-color: black; font-size: 12px; }\n"
+            + "QHeaderView::section { background-color: #F8FAFC; "
+            + "font-weight: 500; font-size: 12px; "
+            + "border: 1px solid #CBD5E1; padding: 3px 6px; color: #475569; }"
+        )
+
+        h_header = self.table_view.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        return self.table_view
+
+    def _create_bottom_bar(self) -> QHBoxLayout:
+        bottom_layout = QHBoxLayout()
+
+        self.status_card.setStyleSheet(
+            "QFrame { background: #F8FAFC; border: 1px solid #E2E8F0; "
+            + "border-radius: 4px; padding: 2px 10px; }"
+        )
+        sc_layout = QHBoxLayout(self.status_card)
+        sc_layout.setContentsMargins(6, 4, 6, 4)
+
+        self.lbl_status.setStyleSheet("font-size: 12px; color: #64748B;")
+        sc_layout.addWidget(self.lbl_status)
+        bottom_layout.addWidget(self.status_card, stretch=1)
+
+        self.btn_save_db.setEnabled(False)
+        self.btn_save_db.setFixedHeight(34)
+        self.btn_save_db.setStyleSheet(
+            "QPushButton { font-size: 12px; font-weight: 500; background-color: #0F766E; "
+            + "color: white; border: none; border-radius: 4px; padding: 0 16px; } "
+            + "QPushButton:hover { background-color: #115E59; } "
+            + "QPushButton:disabled { background-color: #E2E8F0; color: #94A3B8; }"
+        )
+        connect_action(self.btn_save_db.clicked, self._save_to_database)
+        bottom_layout.addWidget(self.btn_save_db)
+
+        return bottom_layout
+
     def _on_line_template_changed(self, idx: int) -> None:
         if 0 <= idx < len(self.line_items):
-            self.input_line_name.setText(self.line_items[idx][1])
+            template_str = self.line_items[idx][1]
+            self.line_template_widget.set_template(template_str)
 
     def _select_file_sn(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл 1 (Сигнал + Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
+            self,
+            "Выберите файл смеси (Сигнал + Шум)",
+            "",
+            "Текстовые спектры (*.txt);;Все файлы (*.*)",
         )
         if file:
             self.file_sn_path = Path(file)
-            self.lbl_sn.setText(f"Файл 1: {self.file_sn_path.name}")
+            self.input_file_sn.setText(self.file_sn_path.name)
+            self.input_file_sn.setToolTip(str(self.file_sn_path))
 
     def _select_file_n(self) -> None:
         file, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл 2 (Шум)", "", "Текстовые файлы (*.txt);;Все файлы (*.*)"
+            self,
+            "Выберите файл собственного шума",
+            "",
+            "Текстовые спектры (*.txt);;Все файлы (*.*)",
         )
         if file:
             self.file_n_path = Path(file)
-            self.lbl_n.setText(f"Файл 2: {self.file_n_path.name}")
+            self.input_file_n.setText(self.file_n_path.name)
+            self.input_file_n.setToolTip(str(self.file_n_path))
 
     def _run_calculation(self) -> None:
         if not self.file_sn_path or not self.file_n_path:
-            _ = QMessageBox.warning(self, "Предупреждение", "Пожалуйста, выберите оба файла!")
+            _ = QMessageBox.warning(
+                self,
+                "Предупреждение",
+                "Выберите оба файла спектров перед расчётом.",
+            )
+            return
+
+        if not self.line_template_widget.is_valid():
+            _ = QMessageBox.warning(
+                self,
+                "Предупреждение",
+                "Заполните параметры исследуемой линии.",
+            )
+            self.line_template_widget.focus_first_empty()
             return
 
         idx = self.combo_line.currentIndex()
         line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
 
-        r_val = None
+        r_val: float | None = None
         if self.input_r.text().strip():
             try:
                 r_val = float(self.input_r.text().replace(",", "."))
             except ValueError:
-                pass
+                r_val = None
 
         try:
-            df, mask, violations = calculate_data(
+            result = calculate_data(
                 file_sn_path=self.file_sn_path,
                 file_n_path=self.file_n_path,
                 config_path=self.config_path,
@@ -261,18 +377,29 @@ class MainWindow(QMainWindow):
                 line_type=line_type,
                 r_param=r_val,
             )
-            self.current_df = df
-            self.violations_mask = mask
-            self.has_violations = violations
+            self.calc_result = result
+            self.table_model.update_data(result.points)
 
-            self.table_model.update_data(df, mask)
+            header = self.table_view.horizontalHeader()
+            if header is not None:
+                header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
 
-            if violations:
-                self.lbl_status.setText("1. Обнаружены нарушения: Подтверждено АЭП")
-                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
+            if result.has_violations:
+                self.lbl_status.setText("Обнаружены нарушения: Подтверждено АЭП")
+                self.lbl_status.setStyleSheet("font-size: 12px; color: #991B1B; font-weight: 500;")
+                self.status_card.setStyleSheet(
+                    "QFrame { background: #FEF2F2; border: 1px solid #FECACA; "
+                    + "border-radius: 4px; padding: 2px 10px; }"
+                )
             else:
-                self.lbl_status.setText("2. Нарушения не обнаружены: Не подтверждено АЭП")
-                self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803D;")
+                self.lbl_status.setText(
+                    "Нарушения не обнаружены"
+                )
+                self.lbl_status.setStyleSheet("font-size: 12px; color: #166534; font-weight: 500;")
+                self.status_card.setStyleSheet(
+                    "QFrame { background: #F0FDF4; border: 1px solid #BBF7D0; "
+                    + "border-radius: 4px; padding: 2px 10px; }"
+                )
 
             self.btn_save_db.setEnabled(True)
 
@@ -280,21 +407,21 @@ class MainWindow(QMainWindow):
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(e))
 
     def _save_to_database(self) -> None:
-        if self.current_df is None or self.violations_mask is None:
+        if self.calc_result is None:
             return
 
         idx = self.combo_line.currentIndex()
         line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
-        line_display_name = self.input_line_name.text().strip() or self.combo_line.currentText()
+        line_full_name = self.line_template_widget.get_full_name()
         operation_mode = self.combo_mode.currentText()
-        meas_type = self.meas_type_group.checkedId()  # 1: Ток, 2: Напряжение
+        meas_type = self.meas_type_group.checkedId()
 
-        r_val = None
+        r_val: float | None = None
         if self.input_r.text().strip():
             try:
                 r_val = float(self.input_r.text().replace(",", "."))
             except ValueError:
-                pass
+                r_val = None
 
         try:
             _ = save_measurement_to_db(
@@ -302,38 +429,44 @@ class MainWindow(QMainWindow):
                 device_name=self.device_name,
                 category=self.category_index + 1,
                 line_number=self.line_number,
-                line_name=line_display_name,
+                line_name=line_full_name,
                 line_type=line_type,
                 operation_mode=operation_mode,
                 measurement_type=meas_type,
                 parameter_r=r_val,
-                has_violations=self.has_violations,
-                df_points=self.current_df,
-                violations_mask=self.violations_mask,
+                has_violations=self.calc_result.has_violations,
+                points=self.calc_result.points,
             )
 
             _ = QMessageBox.information(
                 self,
                 "Успех",
-                f"Измерение для линии №{self.line_number} успешно занесено в базу данных!",
+                f"Измерение для линии «{line_full_name}» сохранено в базу данных.",
             )
 
-            # Сброс полей по схеме Plan.svg
-            self.file_sn_path = None
-            self.file_n_path = None
-            self.lbl_sn.setText("Файл 1: Не выбран")
-            self.lbl_n.setText("Файл 2: Не выбран")
-            self.input_r.clear()
-            self.current_df = None
-            self.violations_mask = None
-            self.table_model.update_data(pd.DataFrame(), None)
-            self.lbl_status.setText("Статус: Ожидание расчёта")
-            self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #4B5563;")
-            self.btn_save_db.setEnabled(False)
-
-            # Инкремент линии N + 1
-            self.line_number += 1
-            self._update_window_title()
+            self._reset_form_for_next_line()
 
         except Exception as e:
-            _ = QMessageBox.critical(self, "Ошибка сохранения в БД", str(e))
+            _ = QMessageBox.critical(self, "Ошибка сохранения", str(e))
+
+    def _reset_form_for_next_line(self) -> None:
+        self.file_sn_path = None
+        self.file_n_path = None
+        self.input_file_sn.clear()
+        self.input_file_n.clear()
+        self.input_r.clear()
+        self.line_template_widget.clear_inputs()
+
+        self.calc_result = None
+        self.table_model.update_data([])
+
+        self.lbl_status.setText("Ожидание запуска расчёта")
+        self.lbl_status.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.status_card.setStyleSheet(
+            "QFrame { background: #F8FAFC; border: 1px solid #E2E8F0; "
+            + "border-radius: 4px; padding: 2px 10px; }"
+        )
+        self.btn_save_db.setEnabled(False)
+
+        self.line_number += 1
+        self._update_window_title()
