@@ -1,42 +1,33 @@
-import re
-from io import StringIO
 from pathlib import Path
 
-import pandas as pd
 
-
-def load_spectrum_txt(file_path: Path | str) -> pd.DataFrame:
+def load_spectrum_map(file_path: Path | str) -> dict[int, float]:
     """
-    Быстро считывает текстовый файл (32k строк).
-    Пропускает строки с комментариями (#, [, ().
-    Корректно обрабатывает запятые в качестве десятичного разделителя.
+    Считывает спектральный файл и возвращает словарь {частота: напряжение}.
+    Не использует сторонние библиотеки, исключая появление Any.
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Файл не найден: {path}")
 
-    cleaned_lines: list[str] = []
-    comment_pattern = re.compile(r"^\s*([#\[\(])")
+    spectrum: dict[int, float] = {}
+    comment_chars = ("#", "[", "(")
 
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             stripped = line.strip()
-            if not stripped or comment_pattern.match(stripped):
+            if not stripped or stripped.startswith(comment_chars):
                 continue
-            cleaned_lines.append(stripped.replace(",", "."))
+            parts = stripped.replace(",", ".").split()
+            if len(parts) >= 2:
+                try:
+                    freq = float(parts[0])
+                    voltage = float(parts[1])
+                    spectrum[int(round(freq))] = voltage
+                except ValueError:
+                    continue
 
-    if not cleaned_lines:
+    if not spectrum:
         raise ValueError(f"Файл {path.name} не содержит числовых данных.")
 
-    df = pd.read_csv(
-        StringIO("\n".join(cleaned_lines)),
-        sep=r"\s+",
-        header=None,
-        names=["freq", "voltage"],
-        dtype={"freq": float, "voltage": float},
-        usecols=[0, 1],
-        engine="c",
-    )
-
-    df["freq"] = df["freq"].round(4)
-    return df
+    return spectrum
