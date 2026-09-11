@@ -4,15 +4,11 @@ version = "0.3.0"
 description = "Десктопное приложение для анализа спектров"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pyqt6>=6.11.0", "numpy>=2.5.3"]
+dependencies = ["pyqt6>=6.11.0"]
 
 [dependency-groups]
 dev = ["basedpyright>=1.40.0", "ruff>=0.16.6"]
-build = ["nuitka>=2.6.0", "zstandard>=0.23.0"]
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+build = ["nuitka>=2.6.0", "pyinstaller>=6.22.2", "zstandard>=0.23.0"]
 
 [tool.ruff]
 line-length = 100
@@ -22,12 +18,8 @@ target-version = "py312"
 select = ["E", "W", "F", "I", "UP", "S", "B", "N"]
 
 [tool.basedpyright]
-include = ["main.py", "core", "gui"]
+include = ["main.py", "core", "gui", "scripts", "tests"]
 pythonVersion = "3.12"
-
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [tool.uv]
 package = false

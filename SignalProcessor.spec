@@ -19,7 +19,6 @@ a = Analysis(
         'gui.table_model',
         'gui.startup_dialog',
         'gui.line_template_widget',
-        'numpy',
         'sqlite3',
         'PyQt6',
     ],

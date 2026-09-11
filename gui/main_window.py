@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.calculator import calculate_data, load_config
+from core.calculator import LineType, calculate_data, load_config
 from core.database import save_measurement_to_db
 from core.models import AppConfig, CalculationResult
 
@@ -49,6 +49,7 @@ def connect_index(signal: IntSignal, slot: Callable[[int], None]) -> None:
 class MainWindow(QMainWindow):
     config_path: Path
     db_path: Path
+    config: AppConfig
     device_name: str
     category_index: int
     line_number: int
@@ -73,7 +74,7 @@ class MainWindow(QMainWindow):
     status_card: QFrame
     btn_save_db: QPushButton
 
-    line_items: list[tuple[str, str]]
+    line_items: list[tuple[LineType, str]]
 
     def __init__(
         self,
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config_path = config_path
         self.db_path = config_path.parent / "measurements.db"
+        self.config = load_config(config_path)
         self.device_name = device_name
         self.category_index = category_index
         self.line_number = 1
@@ -114,22 +116,15 @@ class MainWindow(QMainWindow):
         self._update_window_title()
 
     def _update_window_title(self) -> None:
-        self.setWindowTitle(f"Анализ спектров — {self.device_name} (Линия №{self.line_number})")
+        self.setWindowTitle(f"{self.device_name}: (Линия №{self.line_number})")
 
     def _load_line_templates(self) -> None:
-        try:
-            cfg: AppConfig = load_config(self.config_path)
-            for name in cfg.lines.symmetrical:
-                self.line_items.append(("symmetrical", name))
-            for name in cfg.lines.asymmetrical:
-                self.line_items.append(("asymmetrical", name))
-            for name in cfg.lines.power:
-                self.line_items.append(("power", name))
-        except (FileNotFoundError, OSError, ValueError):
-            self.line_items = [
-                ("power", "Заземление"),
-                ("symmetrical", "ЛВС, пара  {} - {}"),
-            ]
+        for name in self.config.lines.symmetrical:
+            self.line_items.append(("symmetrical", name))
+        for name in self.config.lines.asymmetrical:
+            self.line_items.append(("asymmetrical", name))
+        for name in self.config.lines.power:
+            self.line_items.append(("power", name))
 
     def _init_ui(self) -> None:
         self.resize(1080, 780)
@@ -249,15 +244,8 @@ class MainWindow(QMainWindow):
         return box
 
     def _load_operation_modes(self) -> None:
-        mode_list: list[str] = ["ХХ", "ДР", "РР"]
-        try:
-            cfg: AppConfig = load_config(self.config_path)
-            mode_list = cfg.operation_modes
-        except (FileNotFoundError, OSError, ValueError):
-            mode_list = ["ХХ", "ДР", "РР"]
-
-        for m in mode_list:
-            self.combo_mode.addItem(m)
+        for mode in self.config.operation_modes:
+            self.combo_mode.addItem(mode)
 
     def _create_table_view(self) -> QTableView:
         self.table_view.setModel(self.table_model)
@@ -359,7 +347,9 @@ class MainWindow(QMainWindow):
             return
 
         idx = self.combo_line.currentIndex()
-        line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
+        line_type: LineType = (
+            self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
+        )
 
         r_val: float | None = None
         if self.input_r.text().strip():
@@ -372,7 +362,7 @@ class MainWindow(QMainWindow):
             result = calculate_data(
                 file_sn_path=self.file_sn_path,
                 file_n_path=self.file_n_path,
-                config_path=self.config_path,
+                config=self.config,
                 category_index=self.category_index,
                 line_type=line_type,
                 r_param=r_val,
@@ -392,9 +382,7 @@ class MainWindow(QMainWindow):
                     + "border-radius: 4px; padding: 2px 10px; }"
                 )
             else:
-                self.lbl_status.setText(
-                    "Нарушения не обнаружены"
-                )
+                self.lbl_status.setText("Нарушения не обнаружены")
                 self.lbl_status.setStyleSheet("font-size: 12px; color: #166534; font-weight: 500;")
                 self.status_card.setStyleSheet(
                     "QFrame { background: #F0FDF4; border: 1px solid #BBF7D0; "
@@ -411,7 +399,9 @@ class MainWindow(QMainWindow):
             return
 
         idx = self.combo_line.currentIndex()
-        line_type = self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
+        line_type: LineType = (
+            self.line_items[idx][0] if 0 <= idx < len(self.line_items) else "power"
+        )
         line_full_name = self.line_template_widget.get_full_name()
         operation_mode = self.combo_mode.currentText()
         meas_type = self.meas_type_group.checkedId()
