@@ -1,4 +1,7 @@
 from dataclasses import dataclass
+from typing import Literal
+
+LineType = Literal["symmetrical", "asymmetrical", "power"]
 
 
 @dataclass(frozen=True, slots=True)

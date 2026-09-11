@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from .models import MeasurementPoint
+from .models import LineType, MeasurementPoint
 
 
 def init_database(db_path: Path) -> None:
@@ -46,7 +46,7 @@ def save_measurement_to_db(
     category: int,
     line_number: int,
     line_name: str,
-    line_type: str,
+    line_type: LineType,
     operation_mode: str,
     measurement_type: int,
     parameter_r: float | None,

@@ -1,23 +1,18 @@
 from pathlib import Path
 
 
-def load_spectrum_values(
-    file_path: Path | str,
-    frequencies: set[int],
-) -> dict[int, float]:
-    """Считывает из спектрального файла только требуемые частоты."""
+def load_spectrum_values(file_path: Path, frequencies: set[int]) -> dict[int, float]:
+    """Считывает только запрошенные частоты из спектрального файла."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Файл не найден: {file_path}")
     if not frequencies:
-        raise ValueError("Не задан список частот для извлечения.")
+        return {}
 
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Файл не найден: {path}")
-
-    spectrum: dict[int, float] = {}
+    found: dict[int, float] = {}
     comment_chars = ("#", "[", "(")
 
-    with path.open(encoding="utf-8", errors="replace") as file:
-        for line in file:
+    with file_path.open(encoding="utf-8", errors="replace") as spectrum_file:
+        for line in spectrum_file:
             stripped = line.strip()
             if not stripped or stripped.startswith(comment_chars):
                 continue
@@ -33,11 +28,10 @@ def load_spectrum_values(
                 continue
 
             if frequency in frequencies:
-                spectrum[frequency] = voltage
+                found[frequency] = voltage
+                if len(found) == len(frequencies):
+                    break
 
-    missing = frequencies - spectrum.keys()
-    if missing:
-        missing_values = sorted(missing)
-        raise ValueError(f"В файле {path.name} отсутствуют частоты: {missing_values}")
-
-    return spectrum
+    if not found:
+        raise ValueError(f"Файл {file_path.name} не содержит запрошенных числовых данных.")
+    return found
