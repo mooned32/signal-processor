@@ -22,9 +22,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.calculator import LineType, calculate_data, load_config
+from core.calculator import calculate_data, load_config
 from core.database import save_measurement_to_db
-from core.models import AppConfig, CalculationResult
+from core.models import AppConfig, CalculationResult, LineType
 
 from .line_template_widget import LineTemplateWidget
 from .table_model import MeasurementTableModel, TableGridDelegate
@@ -47,9 +47,7 @@ def connect_index(signal: IntSignal, slot: Callable[[int], None]) -> None:
 
 
 class MainWindow(QMainWindow):
-    config_path: Path
     db_path: Path
-    config: AppConfig
     device_name: str
     category_index: int
     line_number: int
@@ -74,6 +72,7 @@ class MainWindow(QMainWindow):
     status_card: QFrame
     btn_save_db: QPushButton
 
+    config: AppConfig
     line_items: list[tuple[LineType, str]]
 
     def __init__(
@@ -83,9 +82,8 @@ class MainWindow(QMainWindow):
         category_index: int,
     ) -> None:
         super().__init__()
-        self.config_path = config_path
-        self.db_path = config_path.parent / "measurements.db"
         self.config = load_config(config_path)
+        self.db_path = config_path.parent / "measurements.db"
         self.device_name = device_name
         self.category_index = category_index
         self.line_number = 1
@@ -119,11 +117,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{self.device_name}: (Линия №{self.line_number})")
 
     def _load_line_templates(self) -> None:
-        for name in self.config.lines.symmetrical:
+        cfg = self.config
+        for name in cfg.lines.symmetrical:
             self.line_items.append(("symmetrical", name))
-        for name in self.config.lines.asymmetrical:
+        for name in cfg.lines.asymmetrical:
             self.line_items.append(("asymmetrical", name))
-        for name in self.config.lines.power:
+        for name in cfg.lines.power:
             self.line_items.append(("power", name))
 
     def _init_ui(self) -> None:

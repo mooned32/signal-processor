@@ -8,7 +8,7 @@ dependencies = ["pyqt6>=6.11.0"]
 
 [dependency-groups]
 dev = ["basedpyright>=1.40.0", "ruff>=0.16.6"]
-build = ["nuitka>=2.6.0", "pyinstaller>=6.22.2", "zstandard>=0.23.0"]
+build = ["nuitka>=2.6.0", "zstandard>=0.23.0"]
 
 [tool.ruff]
 line-length = 100
@@ -18,8 +18,24 @@ target-version = "py312"
 select = ["E", "W", "F", "I", "UP", "S", "B", "N"]
 
 [tool.basedpyright]
-include = ["main.py", "core", "gui", "scripts", "tests"]
+include = ["main.py", "core", "gui", "scripts"]
 pythonVersion = "3.12"
+typeCheckingMode = "strict"
+failOnWarnings = true
+
+reportAny = true
+reportExplicitAny = true
+reportUnknownParameterType = true
+reportUnknownArgumentType = true
+reportUnknownVariableType = true
+reportUnknownMemberType = true
+reportUnknownLambdaType = true
+reportMissingParameterType = true
+reportMissingTypeArgument = true
+reportPrivateUsage = true
+reportUnnecessaryCast = true
+reportUnnecessaryComparison = true
+reportUnreachable = true
 
 [tool.uv]
 package = false

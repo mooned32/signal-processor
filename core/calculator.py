@@ -1,26 +1,27 @@
 import math
 import tomllib
 from pathlib import Path
-from typing import Literal, TypeGuard
+from typing import TypeGuard, cast
 
 from .models import (
     AppConfig,
     CalculationResult,
     FrequencyConstantsConfig,
     LineConfig,
+    LineType,
     MeasurementPoint,
     NormNoiseByLineConfig,
     NormParamsConfig,
 )
 from .parser import load_spectrum_values
 
-LineType = Literal["symmetrical", "asymmetrical", "power"]
-EXPECTED_POINT_COUNT = 20
-
 
 def is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
     """Проверяет, что объект является словарём со строковыми ключами."""
-    return isinstance(val, dict) and all(isinstance(key, str) for key in val)
+    if not isinstance(val, dict):
+        return False
+    raw_dict = cast(dict[object, object], val)
+    return all(isinstance(key, str) for key in raw_dict)
 
 
 def is_object_list(val: object) -> TypeGuard[list[object]]:
@@ -31,10 +32,9 @@ def is_object_list(val: object) -> TypeGuard[list[object]]:
 def _parse_float_list(raw: object) -> list[float]:
     if not is_object_list(raw):
         return []
-
     result: list[float] = []
     for item in raw:
-        if isinstance(item, (int, float)):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
             result.append(float(item))
     return result
 
@@ -42,159 +42,143 @@ def _parse_float_list(raw: object) -> list[float]:
 def _parse_str_list(raw: object) -> list[str]:
     if not is_object_list(raw):
         return []
+    return [item for item in raw if isinstance(item, str)]
 
-    result: list[str] = []
-    for item in raw:
-        if isinstance(item, str):
-            result.append(item)
-    return result
+
+def _get_mapping(raw: dict[str, object], key: str) -> dict[str, object]:
+    value = raw.get(key)
+    if not is_str_dict(value):
+        raise ValueError(f"Секция [{key}] отсутствует или имеет некорректный формат")
+    return value
 
 
 def load_config(config_path: Path) -> AppConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Конфигурационный файл не найден: {config_path}")
 
-    with config_path.open("rb") as file:
-        raw_data: object = tomllib.load(file)
+    with config_path.open("rb") as config_file:
+        raw_data: object = tomllib.load(config_file)
 
     if not is_str_dict(raw_data):
         raise ValueError("Некорректный формат config.toml")
 
-    raw_freq = raw_data.get("frequency_constants")
-    if not is_str_dict(raw_freq):
-        raise ValueError("Секция [frequency_constants] отсутствует в config.toml")
+    raw_freq = _get_mapping(raw_data, "frequency_constants")
+    number_of_constants = raw_freq.get("number_of_constants")
+    if not isinstance(number_of_constants, (int, float)) or isinstance(number_of_constants, bool):
+        number_of_constants = 20
 
-    num_c = raw_freq.get("number_of_constants")
     freq_cfg = FrequencyConstantsConfig(
-        number_of_constants=int(num_c) if isinstance(num_c, (int, float)) else EXPECTED_POINT_COUNT,
+        number_of_constants=int(number_of_constants),
         f_i=_parse_float_list(raw_freq.get("f_i")),
         delta_f_i=_parse_float_list(raw_freq.get("delta_f_i")),
         delta_A_i=_parse_float_list(raw_freq.get("delta_A_i")),
     )
 
-    raw_norm = raw_data.get("norm_params_by_category")
-    if not is_str_dict(raw_norm):
-        raise ValueError("Секция [norm_params_by_category] отсутствует в config.toml")
-
+    raw_norm = _get_mapping(raw_data, "norm_params_by_category")
     norm_cfg = NormParamsConfig(
         delta_stn=_parse_float_list(raw_norm.get("delta_stn")),
         w_n=_parse_float_list(raw_norm.get("w_n")),
     )
 
-    raw_noise = raw_data.get("norm_noise_by_line")
-    if not is_str_dict(raw_noise):
-        raise ValueError("Секция [norm_noise_by_line] отсутствует в config.toml")
+    raw_noise = _get_mapping(raw_data, "norm_noise_by_line")
+    raw_sym = _get_mapping(raw_noise, "symmetrical")
+    raw_asym = _get_mapping(raw_noise, "asymmetrical")
+    raw_power = _get_mapping(raw_noise, "power")
 
-    sym_noise = raw_noise.get("symmetrical")
-    asym_noise = raw_noise.get("asymmetrical")
-    pwr_noise = raw_noise.get("power")
-
-    if not is_str_dict(sym_noise) or not is_str_dict(asym_noise) or not is_str_dict(pwr_noise):
+    sym_noise = _parse_float_list(raw_sym.get("values"))
+    asym_noise = _parse_float_list(raw_asym.get("values"))
+    power_noise = _parse_float_list(raw_power.get("values"))
+    if not all(len(values) == 20 for values in (sym_noise, asym_noise, power_noise)):
         raise ValueError(
-            "В [norm_noise_by_line] должны быть секции symmetrical, asymmetrical и power"
-        )
-
-    sym_noise_vals = _parse_float_list(sym_noise.get("values"))
-    asym_noise_vals = _parse_float_list(asym_noise.get("values"))
-    pwr_noise_vals = _parse_float_list(pwr_noise.get("values"))
-
-    if (
-        len(sym_noise_vals) != EXPECTED_POINT_COUNT
-        or len(asym_noise_vals) != EXPECTED_POINT_COUNT
-        or len(pwr_noise_vals) != EXPECTED_POINT_COUNT
-    ):
-        raise ValueError(
-            "В [norm_noise_by_line] списки values должны содержать ровно "
-            f"по {EXPECTED_POINT_COUNT} значений!"
+            "В [norm_noise_by_line] списки values должны содержать ровно по 20 значений!"
         )
 
     norm_noise_cfg = NormNoiseByLineConfig(
-        symmetrical=sym_noise_vals,
-        asymmetrical=asym_noise_vals,
-        power=pwr_noise_vals,
+        symmetrical=sym_noise,
+        asymmetrical=asym_noise,
+        power=power_noise,
     )
 
     raw_line = raw_data.get("line")
-    sym_names: list[str] = []
-    asym_names: list[str] = []
-    pwr_names: list[str] = []
+    if not is_str_dict(raw_line):
+        raw_line = {}
 
-    if is_str_dict(raw_line):
-        sym = raw_line.get("symmetrical")
-        if is_str_dict(sym):
-            sym_names = _parse_str_list(sym.get("names"))
-        asym = raw_line.get("asymmetrical")
-        if is_str_dict(asym):
-            asym_names = _parse_str_list(asym.get("names"))
-        pwr = raw_line.get("power")
-        if is_str_dict(pwr):
-            pwr_names = _parse_str_list(pwr.get("names"))
+    def parse_line_names(line_type: LineType) -> list[str]:
+        raw_line_type = raw_line.get(line_type)
+        if not is_str_dict(raw_line_type):
+            return []
+        return _parse_str_list(raw_line_type.get("names"))
 
     lines_cfg = LineConfig(
-        symmetrical=sym_names,
-        asymmetrical=asym_names,
-        power=pwr_names,
+        symmetrical=parse_line_names("symmetrical"),
+        asymmetrical=parse_line_names("asymmetrical"),
+        power=parse_line_names("power"),
     )
 
     raw_modes = raw_data.get("operation_modes")
-    modes_list = ["ХХ", "ДР", "РР"]
-    if is_str_dict(raw_modes):
-        parsed = _parse_str_list(raw_modes.get("modes"))
-        if parsed:
-            modes_list = parsed
+    modes = _parse_str_list(raw_modes.get("modes")) if is_str_dict(raw_modes) else []
+    if not modes:
+        modes = ["ХХ", "ДР", "РР"]
 
     return AppConfig(
         frequency_constants=freq_cfg,
         norm_params=norm_cfg,
         norm_noise_by_line=norm_noise_cfg,
         lines=lines_cfg,
-        operation_modes=modes_list,
+        operation_modes=modes,
     )
 
 
-def _validate_config_for_calculation(config: AppConfig, category_index: int) -> None:
-    frequency_count = len(config.frequency_constants.f_i)
-    delta_frequency_count = len(config.frequency_constants.delta_f_i)
-    if frequency_count != EXPECTED_POINT_COUNT or delta_frequency_count != EXPECTED_POINT_COUNT:
-        raise ValueError(
-            "В frequency_constants f_i и delta_f_i должны содержать ровно "
-            f"по {EXPECTED_POINT_COUNT} чисел!"
-        )
-
-    if not 0 <= category_index < len(config.norm_params.delta_stn):
-        raise ValueError(f"Категория {category_index + 1} отсутствует в delta_stn!")
-
-
 def _extract_spectrum_voltages(
-    frequencies: list[float],
+    f_list: list[float],
     file_path: Path,
 ) -> list[float]:
-    required_frequencies = {int(round(frequency)) for frequency in frequencies}
-    spectrum = load_spectrum_values(file_path, required_frequencies)
-    return [spectrum[int(round(frequency))] for frequency in frequencies]
+    requested = {int(round(frequency)) for frequency in f_list}
+    spectrum_values = load_spectrum_values(file_path, requested)
+
+    matched: list[float] = []
+    missing: list[float] = []
+    for frequency in f_list:
+        key = int(round(frequency))
+        value = spectrum_values.get(key)
+        if value is None:
+            missing.append(frequency)
+        else:
+            matched.append(value)
+
+    if missing:
+        raise ValueError(f"В файле {file_path.name} отсутствуют частоты: {missing}")
+    return matched
+
+
+def _select_line_noise(config: AppConfig, line_type: LineType) -> list[float]:
+    match line_type:
+        case "symmetrical":
+            return config.norm_noise_by_line.symmetrical
+        case "asymmetrical":
+            return config.norm_noise_by_line.asymmetrical
+        case "power":
+            return config.norm_noise_by_line.power
 
 
 def _calculate_point(
     index: int,
-    f_value: float,
     delta_f: float,
+    frequency: float,
     u_sn: float,
     u_n: float,
     delta_stn: float,
-    factor: float,
 ) -> MeasurementPoint:
-    # Математика намеренно остаётся на Python float/math: промежуточного
-    # округления нет, округляются только значения, сохраняемые в результате.
-    diff = u_sn * u_sn - u_n * u_n
-    u_s = math.sqrt(diff) if diff > 0.0 else 0.0
-
+    u_s_squared = u_sn**2 - u_n**2
+    u_s = math.sqrt(u_s_squared) if u_s_squared > 0.0 else 0.0
+    factor = (2.66 * math.exp(2.3)) / 5.34
     q_inner = 0.90 + factor * u_s
     q = math.sqrt(q_inner) if q_inner > 0.0 else 0.0
 
     return MeasurementPoint(
         index=index,
         delta_f=round(delta_f, 4),
-        f=round(f_value, 4),
+        f=round(frequency, 4),
         u_sn=round(u_sn, 4),
         u_n=round(u_n, 4),
         u_s=round(u_s, 4),
@@ -211,40 +195,40 @@ def calculate_data(
     line_type: LineType,
     r_param: float | None = None,
 ) -> CalculationResult:
-    """Рассчитывает параметры по двум спектрам без сторонних численных библиотек."""
+    """Выполняет расчёт по двум спектрам и типизированной конфигурации."""
     _ = r_param
-    _validate_config_for_calculation(config, category_index)
+    line_noise = _select_line_noise(config, line_type)
+    if len(line_noise) != 20:
+        raise ValueError("В конфигурации нормированный шум должен содержать ровно 20 значений!")
 
     f_list = config.frequency_constants.f_i
     delta_f_list = config.frequency_constants.delta_f_i
-    delta_stn = config.norm_params.delta_stn[category_index]
+    if len(f_list) != 20 or len(delta_f_list) != 20:
+        raise ValueError("В frequency_constants f_i и delta_f_i должны содержать по 20 чисел!")
 
-    # Проверка типа линии сохраняется, хотя соответствующая нормированная
-    # таблица пока не участвует в формуле расчёта.
-    if line_type not in {"symmetrical", "asymmetrical", "power"}:
-        raise ValueError(f"Неизвестный тип линии: {line_type}")
+    delta_stn_list = config.norm_params.delta_stn
+    if not 0 <= category_index < len(delta_stn_list):
+        raise ValueError(f"Категория {category_index + 1} отсутствует в delta_stn!")
+    delta_stn_value = delta_stn_list[category_index]
 
     u_sn_list = _extract_spectrum_voltages(f_list, file_sn_path)
     u_n_list = _extract_spectrum_voltages(f_list, file_n_path)
 
-    factor = (2.66 * math.pow(math.e, 2.3)) / 5.34
-    points: list[MeasurementPoint] = []
-
-    for index, (f_value, delta_f, u_sn, u_n) in enumerate(
-        zip(f_list, delta_f_list, u_sn_list, u_n_list, strict=True),
-        start=1,
-    ):
-        points.append(
-            _calculate_point(
-                index=index,
-                f_value=f_value,
-                delta_f=delta_f,
-                u_sn=u_sn,
-                u_n=u_n,
-                delta_stn=delta_stn,
-                factor=factor,
-            )
+    points = [
+        _calculate_point(
+            index=index + 1,
+            delta_f=delta_f,
+            frequency=frequency,
+            u_sn=u_sn,
+            u_n=u_n,
+            delta_stn=delta_stn_value,
         )
+        for index, (delta_f, frequency, u_sn, u_n) in enumerate(
+            zip(delta_f_list, f_list, u_sn_list, u_n_list, strict=True)
+        )
+    ]
 
-    has_violations = any(point.is_violation for point in points)
-    return CalculationResult(points=points, has_violations=has_violations)
+    return CalculationResult(
+        points=points,
+        has_violations=any(point.is_violation for point in points),
+    )
