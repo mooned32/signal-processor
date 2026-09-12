@@ -1,40 +1,37 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-ROOT_DIR = Path.cwd()
+ROOT_DIR = Path(__name__).resolve().parent
+SRC_DIR = ROOT_DIR / "src"
+
 
 a = Analysis(
-    ['main.py'],
-    pathex=[str(ROOT_DIR)],
+    [str(SRC_DIR / "main.py")],
+    pathex=[str(SRC_DIR)],
     binaries=[],
     datas=[],
     hiddenimports=[
-        'core',
-        'core.calculator',
-        'core.parser',
-        'core.database',
-        'core.models',
-        'gui',
-        'gui.main_window',
-        'gui.table_model',
-        'gui.startup_dialog',
-        'gui.line_template_widget',
-        'numpy',
-        'sqlite3',
-        'PyQt6',
+        "calculation",
+        "calculation.calculation",
+        "calculation.models",
+        "config",
+        "config.config_loader",
+        "database",
+        "database.database",
+        "errors",
+        "errors.error",
+        "spectrum_io",
+        "spectrum_io.spectrum_reader",
+        "ui",
+        "ui.line_template_widget",
+        "ui.main_window",
+        "ui.startup_dialog",
+        "ui.table_model",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'pandas',
-        'PyQt6.QtNetwork',
-        'PyQt6.QtQml',
-        'PyQt6.QtQuick',
-        'PyQt6.QtPdf',
-        'tkinter',
-        'unittest',
-    ],
+    excludes=["tkinter", "PyQt6.QtNetwork", "PyQt6.QtQml", "PyQt6.QtQuick", "PyQt6.QtPdf"],
     noarchive=False,
 )
 
@@ -46,7 +43,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='SignalProcessor',
+    name="SignalProcessor",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

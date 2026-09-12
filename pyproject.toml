@@ -1,14 +1,13 @@
 [project]
 name = "signal-processor"
-version = "0.4.0"
+version = "0.5.0"
 description = "Десктопное приложение для анализа спектров"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["pyqt6>=6.11.0"]
 
 [dependency-groups]
 dev = ["basedpyright>=1.40.0", "ruff>=0.16.6"]
-build = ["nuitka>=2.6.0", "zstandard>=0.23.0"]
+build = ["pyinstaller>=6.14.0"]
 
 [tool.ruff]
 line-length = 100
@@ -18,11 +17,10 @@ target-version = "py312"
 select = ["E", "W", "F", "I", "UP", "S", "B", "N"]
 
 [tool.basedpyright]
-include = ["main.py", "core", "gui", "scripts"]
+include = ["src", "tests", "scripts"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 failOnWarnings = true
-
 reportAny = true
 reportExplicitAny = true
 reportUnknownParameterType = true

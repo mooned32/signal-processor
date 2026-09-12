@@ -1,13 +1,14 @@
 import sqlite3
 from pathlib import Path
 
-from .models import LineType, MeasurementPoint
+from calculation.models import CalculationResult, LineType
 
 
 def init_database(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        _ = cursor.execute("""
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_name TEXT NOT NULL,
@@ -19,10 +20,12 @@ def init_database(db_path: Path) -> None:
                 measurement_type INTEGER NOT NULL,
                 parameter_r REAL,
                 has_violations INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        _ = cursor.execute("""
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS measurement_points (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 measurement_id INTEGER NOT NULL,
@@ -36,11 +39,12 @@ def init_database(db_path: Path) -> None:
                 is_violation INTEGER NOT NULL,
                 FOREIGN KEY (measurement_id) REFERENCES measurements(id) ON DELETE CASCADE
             )
-        """)
-        conn.commit()
+            """
+        )
+        connection.commit()
 
 
-def save_measurement_to_db(
+def save_measurement(
     db_path: Path,
     device_name: str,
     category: int,
@@ -49,15 +53,13 @@ def save_measurement_to_db(
     line_type: LineType,
     operation_mode: str,
     measurement_type: int,
-    parameter_r: float | None,
-    has_violations: bool,
-    points: list[MeasurementPoint],
+    resistance: float | None,
+    result: CalculationResult,
 ) -> int:
     init_database(db_path)
 
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        _ = cursor.execute(
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
             """
             INSERT INTO measurements (
                 device_name, category, line_number, line_name, line_type,
@@ -72,36 +74,34 @@ def save_measurement_to_db(
                 line_type,
                 operation_mode,
                 measurement_type,
-                parameter_r,
-                1 if has_violations else 0,
+                resistance,
+                int(result.has_violations),
             ),
         )
-        if cursor.lastrowid is None:
+        measurement_id = cursor.lastrowid
+        if measurement_id is None:
             raise RuntimeError("Не удалось получить идентификатор созданной записи.")
-        measurement_id: int = cursor.lastrowid
 
-        rows_to_insert = [
-            (
-                measurement_id,
-                p.index,
-                p.delta_f,
-                p.f,
-                p.u_sn,
-                p.u_n,
-                p.u_s,
-                p.q,
-                1 if p.is_violation else 0,
-            )
-            for p in points
-        ]
-
-        _ = cursor.executemany(
+        connection.executemany(
             """
             INSERT INTO measurement_points (
                 measurement_id, point_index, delta_f, f, u_sn, u_n, u_s, q, is_violation
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            rows_to_insert,
+            [
+                (
+                    measurement_id,
+                    point.index,
+                    point.delta_f,
+                    point.f,
+                    point.u_sn,
+                    point.u_n,
+                    point.u_s,
+                    point.q,
+                    int(point.is_violation),
+                )
+                for point in result.points
+            ],
         )
-        conn.commit()
-        return measurement_id
+        connection.commit()
+        return int(measurement_id)

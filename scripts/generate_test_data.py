@@ -9,49 +9,33 @@ def generate_spectrum_files(
     output_dir: Path | None = None,
     num_points: int = 32_000,
 ) -> tuple[Path, Path]:
-    target_dir = Path("test_data") if output_dir is None else output_dir
+    target_dir = Path(__file__).resolve().parent / "test_data" if output_dir is None else output_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_sn_path = target_dir / "signal_noise.txt"
     file_n_path = target_dir / "noise.txt"
-
-    freq_floats: list[float] = [float(i) for i in range(1, num_points + 1)]
-
-    # Генерация шума в чистом Python
-    noise_floats: list[float] = [
-        max(0.5, min(4.0, random.gauss(1.5, 0.3))) for _ in range(num_points)
+    frequencies = [float(index) for index in range(1, num_points + 1)]
+    noise = [max(0.5, min(4.0, random.gauss(1.5, 0.3))) for _ in frequencies]
+    signal = [5.0 + 3.0 * math.sin(2.0 * math.pi * f / 2000.0) for f in frequencies]
+    signal_noise = [
+        math.sqrt(s**2 + n**2) + random.gauss(0.0, 0.1) for s, n in zip(signal, noise, strict=True)
     ]
 
-    # Сигнал U_с
-    signal_floats: list[float] = [
-        5.0 + 3.0 * math.sin(2.0 * math.pi * f / 2000.0) for f in freq_floats
-    ]
-
-    # Смесь U_сш
-    sn_floats: list[float] = [
-        math.sqrt(s**2 + n**2) + random.gauss(0.0, 0.1)
-        for s, n in zip(signal_floats, noise_floats, strict=True)
-    ]
-
-    noise_lines: list[str] = [
-        "# Тестовый спектр: ЧИСТЫЙ ШУМ (U_ш)\n",
-        "[Параметры: 32000 строк, шаг 1.0]\n",
-        *(f"{freq:.2f}\t{val:.3f}\n" for freq, val in zip(freq_floats, noise_floats, strict=True)),
-    ]
-    with open(file_n_path, "w", encoding="utf-8") as f_n:
-        f_n.writelines(noise_lines)
-
-    sn_lines: list[str] = [
-        "# Тестовый спектр: СИГНАЛ + ШУМ (U_сш)\n",
-        "[Параметры: 32000 строк, шаг 1.0]\n",
-        *(f"{freq:.2f}\t{val:.3f}\n" for freq, val in zip(freq_floats, sn_floats, strict=True)),
-    ]
-    with open(file_sn_path, "w", encoding="utf-8") as f_sn:
-        f_sn.writelines(sn_lines)
-
-    print(f"Готово! Сгенерированы:\n - {file_sn_path}\n - {file_n_path}")
+    file_n_path.write_text(
+        "# Тестовый спектр: ЧИСТЫЙ ШУМ (U_ш)\n"
+        "[Параметры: 32000 строк, шаг 1.0]\n"
+        + "".join(f"{f:.2f}\t{n:.3f}\n" for f, n in zip(frequencies, noise, strict=True)),
+        encoding="utf-8",
+    )
+    file_sn_path.write_text(
+        "# Тестовый спектр: СИГНАЛ + ШУМ (U_сш)\n"
+        "[Параметры: 32000 строк, шаг 1.0]\n"
+        + "".join(f"{f:.2f}\t{v:.3f}\n" for f, v in zip(frequencies, signal_noise, strict=True)),
+        encoding="utf-8",
+    )
     return file_sn_path, file_n_path
 
 
 if __name__ == "__main__":
-    _ = generate_spectrum_files()
+    paths = generate_spectrum_files()
+    print(f"Готово! Сгенерированы:\n - {paths[0]}\n - {paths[1]}")
