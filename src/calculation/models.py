@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 LineType = Literal["symmetrical", "asymmetrical", "power"]
+MeasurementKind = Literal["voltage", "current"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +62,21 @@ class MeasurementPoint:
     q: float
     is_violation: bool
 
+    @property
+    def i_sn(self) -> float:
+        return self.u_sn
+
+    @property
+    def i_n(self) -> float:
+        return self.u_n
+
+    @property
+    def i_s(self) -> float:
+        return self.u_s
+
 
 @dataclass(frozen=True, slots=True)
 class CalculationResult:
     points: list[MeasurementPoint]
     has_violations: bool
+    measurement_type: MeasurementKind = "voltage"

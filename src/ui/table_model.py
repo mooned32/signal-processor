@@ -3,15 +3,17 @@ from typing import override
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt
 from PyQt6.QtGui import QColor
 
-from calculation.models import MeasurementPoint
+from calculation.models import MeasurementKind, MeasurementPoint
 
 
 class MeasurementTableModel(QAbstractTableModel):
-    COLUMNS: tuple[str, ...] = ("№", "Δf, Гц", "f, Гц", "U_сш", "U_ш", "U_с", "q")
+    VOLTAGE_COLUMNS: tuple[str, ...] = ("№", "Δf, Гц", "f, Гц", "U_сш", "U_ш", "U_с", "q")
+    CURRENT_COLUMNS: tuple[str, ...] = ("№", "Δf, Гц", "f, Гц", "I_сш", "I_ш", "I_с", "q")
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._points: list[MeasurementPoint] = []
+        self._columns: tuple[str, ...] = ()
 
     @override
     def rowCount(self, parent: QModelIndex | None = None) -> int:
@@ -23,7 +25,7 @@ class MeasurementTableModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex | None = None) -> int:
         if parent is not None and parent.isValid():
             return 0
-        return len(self.COLUMNS)
+        return len(self._columns)
 
     @override
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
@@ -76,11 +78,24 @@ class MeasurementTableModel(QAbstractTableModel):
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> str | None:
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            if 0 <= section < len(self.COLUMNS):
-                return self.COLUMNS[section]
+            if 0 <= section < len(self._columns):
+                return self._columns[section]
         return None
 
-    def update_data(self, points: list[MeasurementPoint]) -> None:
+    def update_data(
+        self,
+        points: list[MeasurementPoint],
+        measurement_type: MeasurementKind | None = None,
+    ) -> None:
         self.beginResetModel()
         self._points = list(points)
+        if not self._points or measurement_type is None:
+            self._columns = ()
+        elif measurement_type == "voltage":
+            self._columns = self.VOLTAGE_COLUMNS
+        else:
+            self._columns = self.CURRENT_COLUMNS
         self.endResetModel()
+
+    def clear(self) -> None:
+        self.update_data([], None)

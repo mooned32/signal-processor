@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from calculation.calculation import calculate
-from calculation.models import AppConfig, CalculationResult, LineType
+from calculation.models import AppConfig, CalculationResult, LineType, MeasurementKind
 from database.database import save_measurement
 from ui.line_template_widget import LineTemplateWidget
 from ui.table_model import MeasurementTableModel
@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
     def _create_input_files_card(self) -> QGroupBox:
         box = QGroupBox("Входные спектры и датчик", self)
         layout = QVBoxLayout(box)
-        layout.addWidget(QLabel("Спектр смеси «Сигнал + Шум» (U_сш):", box))
+        layout.addWidget(QLabel("Спектр смеси «Сигнал + Шум»:", box))
 
         signal_row = QHBoxLayout()
         self.signal_noise_edit.setReadOnly(True)
@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
         signal_row.addWidget(signal_button)
         layout.addLayout(signal_row)
 
-        layout.addWidget(QLabel("Спектр собственного шума (U_ш):", box))
+        layout.addWidget(QLabel("Спектр собственного шума:", box))
         noise_row = QHBoxLayout()
         self.noise_edit.setReadOnly(True)
         self.noise_edit.setPlaceholderText("Файл не выбран...")
@@ -238,6 +238,20 @@ class MainWindow(QMainWindow):
             return self.line_items[index][0]
         return "power"
 
+    def _current_measurement_type(self) -> MeasurementKind:
+        if self.current_radio.isChecked():
+            return "current"
+        return "voltage"
+
+    def _read_resistance(self) -> float | None:
+        text = self.resistance_edit.text().strip()
+        if not text:
+            return None
+        try:
+            return float(text.replace(",", "."))
+        except ValueError:
+            return None
+
     def _run_calculation(self) -> None:
         if self.signal_noise_path is None or self.noise_path is None:
             _ = QMessageBox.warning(
@@ -256,20 +270,28 @@ class MainWindow(QMainWindow):
             self.line_template.focus_first_empty()
             return
 
+        measurement_type = self._current_measurement_type()
+        resistance = self._read_resistance()
+
         try:
             result = calculate(
-                self.signal_noise_path,
-                self.noise_path,
-                self.config,
-                self.category_index,
-                self._current_line_type(),
+                signal_noise_path=self.signal_noise_path,
+                noise_path=self.noise_path,
+                config=self.config,
+                category_index=self.category_index,
+                line_type=self._current_line_type(),
+                measurement_type=measurement_type,
+                resistance=resistance,
             )
         except (FileNotFoundError, ValueError) as error:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(error))
             return
 
         self.calculation_result = result
-        self.table_model.update_data(result.points)
+        self.table_model.update_data(result.points, result.measurement_type)
+        header = self.table_view.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._update_status(result)
         self.save_button.setEnabled(True)
 
@@ -286,13 +308,7 @@ class MainWindow(QMainWindow):
         index = self.line_combo.currentIndex()
         line_name = self.line_template.full_name()
         mode = self.operation_mode.currentText()
-        resistance: float | None = None
-        text = self.resistance_edit.text().strip()
-        if text:
-            try:
-                resistance = float(text.replace(",", "."))
-            except ValueError:
-                resistance = None
+        resistance = self._read_resistance()
 
         try:
             save_measurement(
@@ -315,5 +331,5 @@ class MainWindow(QMainWindow):
         self.line_number += 1
         self._update_window_title()
         self.calculation_result = None
-        self.table_model.update_data([])
+        self.table_model.clear()
         self.save_button.setEnabled(False)
