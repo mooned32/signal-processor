@@ -23,6 +23,7 @@ a = Analysis(
         "spectrum_io",
         "spectrum_io.spectrum_reader",
         "ui",
+        "ui.file_drop_line_edit",
         "ui.line_template_widget",
         "ui.main_window",
         "ui.startup_dialog",

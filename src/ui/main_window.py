@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from calculation.calculation import calculate
 from calculation.models import AppConfig, CalculationResult, LineType, MeasurementKind
 from database.database import save_measurement
+from ui.file_drop_line_edit import FileDropLineEdit
 from ui.line_template_widget import LineTemplateWidget
 from ui.table_model import MeasurementTableModel
 
@@ -66,8 +67,16 @@ class MainWindow(QMainWindow):
         self.calculation_result: CalculationResult | None = None
         self.line_items: list[tuple[LineType, str]] = []
 
-        self.signal_noise_edit = QLineEdit(self)
-        self.noise_edit = QLineEdit(self)
+        self.signal_noise_edit = FileDropLineEdit(
+            placeholder="Файл не выбран...",
+            on_file_dropped=self._set_signal_noise_file,
+            parent=self,
+        )
+        self.noise_edit = FileDropLineEdit(
+            placeholder="Файл не выбран...",
+            on_file_dropped=self._set_noise_file,
+            parent=self,
+        )
         self.current_radio = QRadioButton("Ток", self)
         self.voltage_radio = QRadioButton("Напряжение", self)
         self.measurement_group = QButtonGroup(self)
@@ -122,8 +131,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Спектр смеси «Сигнал + Шум»:", box))
 
         signal_row = QHBoxLayout()
-        self.signal_noise_edit.setReadOnly(True)
-        self.signal_noise_edit.setPlaceholderText("Файл не выбран...")
         signal_button = QPushButton("Обзор...", box)
         signal_row.addWidget(self.signal_noise_edit)
         signal_row.addWidget(signal_button)
@@ -131,8 +138,6 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Спектр собственного шума:", box))
         noise_row = QHBoxLayout()
-        self.noise_edit.setReadOnly(True)
-        self.noise_edit.setPlaceholderText("Файл не выбран...")
         noise_button = QPushButton("Обзор...", box)
         noise_row.addWidget(self.noise_edit)
         noise_row.addWidget(noise_button)
@@ -210,6 +215,18 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(self.line_items):
             self.line_template.set_template(self.line_items[index][1])
 
+    def _set_signal_noise_file(self, path: Path) -> None:
+        resolved = path.resolve()
+        self.signal_noise_path = resolved
+        self.signal_noise_edit.setText(str(resolved))
+        self.signal_noise_edit.setToolTip(str(resolved))
+
+    def _set_noise_file(self, path: Path) -> None:
+        resolved = path.resolve()
+        self.noise_path = resolved
+        self.noise_edit.setText(str(resolved))
+        self.noise_edit.setToolTip(str(resolved))
+
     def _select_signal_noise_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -218,8 +235,7 @@ class MainWindow(QMainWindow):
             "Текстовые спектры (*.txt);;Все файлы (*.*)",
         )
         if path:
-            self.signal_noise_path = Path(path)
-            self.signal_noise_edit.setText(self.signal_noise_path.name)
+            self._set_signal_noise_file(Path(path))
 
     def _select_noise_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -229,8 +245,7 @@ class MainWindow(QMainWindow):
             "Текстовые спектры (*.txt);;Все файлы (*.*)",
         )
         if path:
-            self.noise_path = Path(path)
-            self.noise_edit.setText(self.noise_path.name)
+            self._set_noise_file(Path(path))
 
     def _current_line_type(self) -> LineType:
         index = self.line_combo.currentIndex()

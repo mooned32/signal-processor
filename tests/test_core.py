@@ -2,17 +2,35 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QMimeData, Qt, QUrl
 
 from calculation.calculation import calculate, calculate_current, calculate_voltage
 from calculation.calculator_current import calculate_current_q
 from calculation.calculator_voltage import calculate_voltage_q
 from config.config_loader import load_config
 from spectrum_io.spectrum_reader import read_required_frequencies
+from ui.file_drop_line_edit import extract_local_file
 from ui.table_model import MeasurementTableModel
+
+
+class FakeMimeData(QMimeData):
+    """Type-safe MIME data test double without untyped method signatures."""
+
+    def __init__(self, urls: list[QUrl] | None = None) -> None:
+        super().__init__()
+        self._urls: list[QUrl] = [] if urls is None else urls
+
+    @override
+    def hasUrls(self) -> bool:
+        return bool(self._urls)
+
+    @override
+    def urls(self) -> list[QUrl]:
+        return list(self._urls)
 
 
 class CoreTests(unittest.TestCase):
@@ -164,6 +182,31 @@ OBJECT_NAME = "Наименование объекта"
         self.assertEqual(len(config.norm_noise_by_line.symmetrical), 20)
         self.assertEqual(len(config.norm_noise_by_line.asymmetrical), 20)
         self.assertEqual(len(config.norm_noise_by_line.power), 20)
+
+    def test_extract_local_file(self) -> None:
+        with tempfile.NamedTemporaryFile() as tmp:
+            tmp_path = Path(tmp.name).resolve()
+            mime = FakeMimeData([QUrl.fromLocalFile(str(tmp_path))])
+            extracted = extract_local_file(mime)
+            self.assertEqual(extracted, tmp_path)
+
+    def test_extract_local_file_rejects_missing_directory_or_multiple_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dir_path = Path(tmp_dir).resolve()
+            mime_dir = FakeMimeData([QUrl.fromLocalFile(str(dir_path))])
+            self.assertIsNone(extract_local_file(mime_dir))
+
+            self.assertIsNone(extract_local_file(FakeMimeData()))
+            self.assertIsNone(extract_local_file(None))
+
+            file_1 = dir_path / "1.txt"
+            file_2 = dir_path / "2.txt"
+            file_1.write_text("a", encoding="utf-8")
+            file_2.write_text("b", encoding="utf-8")
+            mime_multiple = FakeMimeData(
+                [QUrl.fromLocalFile(str(file_1)), QUrl.fromLocalFile(str(file_2))]
+            )
+            self.assertIsNone(extract_local_file(mime_multiple))
 
 
 if __name__ == "__main__":

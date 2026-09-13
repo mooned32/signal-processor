@@ -1,6 +1,6 @@
 # Signal Processor
 
-Desktop application for signal and noise spectrum analysis.
+Десктопное приложение для анализа спектров.
 
 ## Установка uv
 
