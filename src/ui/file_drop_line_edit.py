@@ -2,12 +2,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QMimeData
+from PyQt6.QtCore import QMimeData, Qt
 from PyQt6.QtGui import (
     QDragEnterEvent,
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QResizeEvent,
 )
 from PyQt6.QtWidgets import QLineEdit, QWidget
 
@@ -29,7 +30,7 @@ def extract_local_file(mime_data: QMimeData | None) -> Path | None:
 
 
 class FileDropLineEdit(QLineEdit):
-    """Read-only line edit that accepts single-file drag-and-drop operations."""
+    """Read-only line edit with middle path elision and drag-and-drop."""
 
     def __init__(
         self,
@@ -39,9 +40,36 @@ class FileDropLineEdit(QLineEdit):
     ) -> None:
         super().__init__(parent)
         self._on_file_dropped = on_file_dropped
+        self._full_path = ""
         self.setReadOnly(True)
         self.setPlaceholderText(placeholder)
         self.setAcceptDrops(True)
+
+    def set_file_path(self, path: Path) -> None:
+        """Store the full path, update tooltip, and set elided display text."""
+        self._full_path = str(path.resolve())
+        self.setToolTip(self._full_path)
+        self._update_display_text()
+
+    def _update_display_text(self) -> None:
+        if not self._full_path:
+            self.setText("")
+            return
+
+        available_width = max(10, self.contentsRect().width() - 12)
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(
+            self._full_path,
+            Qt.TextElideMode.ElideMiddle,
+            available_width,
+        )
+        self.setText(elided)
+        self.setCursorPosition(0)
+
+    @override
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._update_display_text()
 
     @override
     def dragEnterEvent(self, a0: QDragEnterEvent | None) -> None:

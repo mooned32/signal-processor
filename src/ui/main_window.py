@@ -218,14 +218,12 @@ class MainWindow(QMainWindow):
     def _set_signal_noise_file(self, path: Path) -> None:
         resolved = path.resolve()
         self.signal_noise_path = resolved
-        self.signal_noise_edit.setText(str(resolved))
-        self.signal_noise_edit.setToolTip(str(resolved))
+        self.signal_noise_edit.set_file_path(resolved)
 
     def _set_noise_file(self, path: Path) -> None:
         resolved = path.resolve()
         self.noise_path = resolved
-        self.noise_edit.setText(str(resolved))
-        self.noise_edit.setToolTip(str(resolved))
+        self.noise_edit.set_file_path(resolved)
 
     def _select_signal_noise_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
