@@ -33,6 +33,18 @@ def _compute_signal_level(signal_noise: float, noise: float) -> float:
     return math.sqrt(signal_power)
 
 
+def _compute_point_r_i(
+    q: float,
+    delta_a: float,
+    frequency: float,
+) -> float:
+    """Calculate intermediate variable r_i using natural logarithm."""
+    log_factor = math.log(1.0 + frequency)
+    scaled_q = q * delta_a
+    r_i = (scaled_q**2) * log_factor
+    return round(r_i, 4)
+
+
 def _calculate_voltage_point(
     index: int,
     delta_f: float,
@@ -42,7 +54,7 @@ def _calculate_voltage_point(
     u_sn: float,
     u_n: float,
     delta_stn: float,
-    resistance: float | None,
+    resistance: float,
 ) -> MeasurementPoint:
     u_s = _compute_signal_level(u_sn, u_n)
     q = calculate_voltage_q(
@@ -62,6 +74,7 @@ def _calculate_voltage_point(
         u_s=round(u_s, 4),
         q=round(q, 4),
         is_violation=q >= delta_stn,
+        r_i=None,
     )
 
 
@@ -74,7 +87,7 @@ def _calculate_current_point(
     i_sn: float,
     i_n: float,
     delta_stn: float,
-    resistance: float | None,
+    resistance: float,
 ) -> MeasurementPoint:
     i_s = _compute_signal_level(i_sn, i_n)
     q = calculate_current_q(
@@ -94,6 +107,7 @@ def _calculate_current_point(
         u_s=round(i_s, 4),
         q=round(q, 4),
         is_violation=q >= delta_stn,
+        r_i=None,
     )
 
 
@@ -101,10 +115,14 @@ def _validate_inputs(
     config: AppConfig,
     category_index: int,
     line_type: LineType,
-) -> tuple[list[float], list[float], list[float], list[float], float]:
+    resistance: float | None,
+) -> tuple[list[float], list[float], list[float], list[float], float, float, float]:
+    if resistance is None or resistance <= 0.0:
+        raise ValueError("Параметр сопротивления R должен быть больше нуля.")
+
     line_noise = _select_line_noise(config, line_type)
     if len(line_noise) != FREQUENCY_COUNT:
-        raise ValueError("В конфигурации нормированный шум должен содержать ровно 20 значений!")
+        raise ValueError("В конфигурации нормированный шум должен содержать ровно 20 значений.")
 
     frequencies = config.frequency_constants.f_i
     delta_frequencies = config.frequency_constants.delta_f_i
@@ -114,13 +132,79 @@ def _validate_inputs(
         or len(delta_frequencies) != FREQUENCY_COUNT
         or len(delta_a_values) != FREQUENCY_COUNT
     ):
-        raise ValueError("Константы частот должны содержать по 20 значений!")
+        raise ValueError("Константы частот должны содержать по 20 значений.")
 
     delta_stn = config.norm_params.delta_stn
-    if not 0 <= category_index < len(delta_stn):
-        raise ValueError(f"Категория {category_index + 1} отсутствует в delta_stn!")
+    w_n_values = config.norm_params.w_n
+    if not (0 <= category_index < len(delta_stn) and 0 <= category_index < len(w_n_values)):
+        raise ValueError(f"Категория {category_index + 1} отсутствует в параметрах нормы.")
 
-    return frequencies, delta_frequencies, delta_a_values, line_noise, delta_stn[category_index]
+    return (
+        frequencies,
+        delta_frequencies,
+        delta_a_values,
+        line_noise,
+        delta_stn[category_index],
+        w_n_values[category_index],
+        resistance,
+    )
+
+
+def _finalize_result(
+    points: list[MeasurementPoint],
+    delta_a_vals: list[float],
+    measurement_type: MeasurementKind,
+    resistance: float,
+    w_n: float,
+) -> CalculationResult:
+    has_violations = any(point.is_violation for point in points)
+    if not has_violations:
+        return CalculationResult(
+            points=points,
+            has_violations=False,
+            measurement_type=measurement_type,
+            w=None,
+            w_n=None,
+            is_w_violation=None,
+        )
+
+    updated_points: list[MeasurementPoint] = []
+    r_i_sum = 0.0
+    for idx, point in enumerate(points):
+        r_i = _compute_point_r_i(
+            q=point.q,
+            delta_a=delta_a_vals[idx],
+            frequency=point.f,
+        )
+        r_i_sum += r_i
+        updated_points.append(
+            MeasurementPoint(
+                index=point.index,
+                delta_f=point.delta_f,
+                f=point.f,
+                u_sn=point.u_sn,
+                u_n=point.u_n,
+                u_s=point.u_s,
+                q=point.q,
+                is_violation=point.is_violation,
+                r_i=r_i,
+            )
+        )
+
+    if measurement_type == "voltage":
+        w_raw = r_i_sum / resistance
+    else:
+        w_raw = r_i_sum * resistance
+
+    w_total = round(w_raw, 4)
+    return CalculationResult(
+        points=updated_points,
+        has_violations=True,
+        measurement_type=measurement_type,
+        w=w_total,
+        w_n=w_n,
+        is_w_violation=w_total >= w_n,
+    )
 
 
 def calculate_voltage(
@@ -131,8 +215,8 @@ def calculate_voltage(
     line_type: LineType,
     resistance: float | None = None,
 ) -> CalculationResult:
-    frequencies, delta_f_vals, delta_a_vals, line_noise, delta_stn = _validate_inputs(
-        config, category_index, line_type
+    frequencies, delta_f_vals, delta_a_vals, line_noise, delta_stn, w_n, valid_r = _validate_inputs(
+        config, category_index, line_type, resistance
     )
     u_sn_values = read_required_frequencies(signal_noise_path, frequencies)
     u_n_values = read_required_frequencies(noise_path, frequencies)
@@ -147,15 +231,11 @@ def calculate_voltage(
             u_sn=u_sn_values[i],
             u_n=u_n_values[i],
             delta_stn=delta_stn,
-            resistance=resistance,
+            resistance=valid_r,
         )
         for i in range(FREQUENCY_COUNT)
     ]
-    return CalculationResult(
-        points=points,
-        has_violations=any(point.is_violation for point in points),
-        measurement_type="voltage",
-    )
+    return _finalize_result(points, delta_a_vals, "voltage", valid_r, w_n)
 
 
 def calculate_current(
@@ -166,8 +246,8 @@ def calculate_current(
     line_type: LineType,
     resistance: float | None = None,
 ) -> CalculationResult:
-    frequencies, delta_f_vals, delta_a_vals, line_noise, delta_stn = _validate_inputs(
-        config, category_index, line_type
+    frequencies, delta_f_vals, delta_a_vals, line_noise, delta_stn, w_n, valid_r = _validate_inputs(
+        config, category_index, line_type, resistance
     )
     i_sn_values = read_required_frequencies(signal_noise_path, frequencies)
     i_n_values = read_required_frequencies(noise_path, frequencies)
@@ -182,15 +262,11 @@ def calculate_current(
             i_sn=i_sn_values[i],
             i_n=i_n_values[i],
             delta_stn=delta_stn,
-            resistance=resistance,
+            resistance=valid_r,
         )
         for i in range(FREQUENCY_COUNT)
     ]
-    return CalculationResult(
-        points=points,
-        has_violations=any(point.is_violation for point in points),
-        measurement_type="current",
-    )
+    return _finalize_result(points, delta_a_vals, "current", valid_r, w_n)
 
 
 def calculate(

@@ -61,6 +61,7 @@ class MeasurementPoint:
     u_s: float
     q: float
     is_violation: bool
+    r_i: float | None = None
 
     @property
     def i_sn(self) -> float:
@@ -80,3 +81,6 @@ class CalculationResult:
     points: list[MeasurementPoint]
     has_violations: bool
     measurement_type: MeasurementKind = "voltage"
+    w: float | None = None
+    w_n: float | None = None
+    is_w_violation: bool | None = None

@@ -18,8 +18,10 @@ def init_database(db_path: Path) -> None:
                 line_type TEXT NOT NULL,
                 operation_mode TEXT NOT NULL,
                 measurement_type INTEGER NOT NULL,
-                parameter_r REAL,
+                parameter_r REAL NOT NULL,
                 has_violations INTEGER NOT NULL,
+                w REAL,
+                is_w_violation INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -37,6 +39,7 @@ def init_database(db_path: Path) -> None:
                 u_s REAL NOT NULL,
                 q REAL NOT NULL,
                 is_violation INTEGER NOT NULL,
+                r_i REAL,
                 FOREIGN KEY (measurement_id) REFERENCES measurements(id) ON DELETE CASCADE
             )
             """
@@ -53,18 +56,20 @@ def save_measurement(
     line_type: LineType,
     operation_mode: str,
     measurement_type: int,
-    resistance: float | None,
+    resistance: float,
     result: CalculationResult,
 ) -> int:
     init_database(db_path)
 
     with sqlite3.connect(db_path) as connection:
+        is_w_viol = int(result.is_w_violation) if result.is_w_violation is not None else None
         cursor = connection.execute(
             """
             INSERT INTO measurements (
                 device_name, category, line_number, line_name, line_type,
-                operation_mode, measurement_type, parameter_r, has_violations
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                operation_mode, measurement_type, parameter_r, has_violations,
+                w, is_w_violation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 device_name,
@@ -76,6 +81,8 @@ def save_measurement(
                 measurement_type,
                 resistance,
                 int(result.has_violations),
+                result.w,
+                is_w_viol,
             ),
         )
         measurement_id = cursor.lastrowid
@@ -85,8 +92,8 @@ def save_measurement(
         connection.executemany(
             """
             INSERT INTO measurement_points (
-                measurement_id, point_index, delta_f, f, u_sn, u_n, u_s, q, is_violation
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                measurement_id, point_index, delta_f, f, u_sn, u_n, u_s, q, is_violation, r_i
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -99,6 +106,7 @@ def save_measurement(
                     point.u_s,
                     point.q,
                     int(point.is_violation),
+                    point.r_i,
                 )
                 for point in result.points
             ],

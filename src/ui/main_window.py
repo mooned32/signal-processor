@@ -283,8 +283,18 @@ class MainWindow(QMainWindow):
             self.line_template.focus_first_empty()
             return
 
-        measurement_type = self._current_measurement_type()
         resistance = self._read_resistance()
+        if resistance is None or resistance <= 0.0:
+            _ = QMessageBox.warning(
+                self,
+                "Предупреждение",
+                "Укажите значение сопротивления R больше нуля перед расчётом.",
+            )
+            self.resistance_edit.setFocus()
+            self.resistance_edit.selectAll()
+            return
+
+        measurement_type = self._current_measurement_type()
 
         try:
             result = calculate(
@@ -310,7 +320,13 @@ class MainWindow(QMainWindow):
 
     def _update_status(self, result: CalculationResult) -> None:
         if result.has_violations:
-            self.status_label.setText("Обнаружены нарушения: Подтверждено АЭП")
+            if result.w is not None and result.w_n is not None:
+                self.status_label.setText(
+                    "Обнаружены нарушения: Подтверждено АЭП "
+                    + f"| W = {result.w:.4f} Вт (норма W_н = {result.w_n:.4f} Вт)"
+                )
+            else:
+                self.status_label.setText("Обнаружены нарушения: Подтверждено АЭП")
         else:
             self.status_label.setText("Нарушения не обнаружены")
 
@@ -318,10 +334,18 @@ class MainWindow(QMainWindow):
         if self.calculation_result is None:
             return
 
+        resistance = self._read_resistance()
+        if resistance is None or resistance <= 0.0:
+            _ = QMessageBox.warning(
+                self,
+                "Предупреждение",
+                "Укажите значение сопротивления R больше нуля перед сохранением.",
+            )
+            return
+
         index = self.line_combo.currentIndex()
         line_name = self.line_template.full_name()
         mode = self.operation_mode.currentText()
-        resistance = self._read_resistance()
 
         try:
             save_measurement(

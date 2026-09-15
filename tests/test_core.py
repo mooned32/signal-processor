@@ -34,10 +34,12 @@ class FakeMimeData(QMimeData):
 
 
 class CoreTests(unittest.TestCase):
-    def _create_test_config_and_spectrums(self, root: Path) -> tuple[Path, Path, Path]:
+    def _create_test_config_and_spectrums(
+        self, root: Path, delta_stn: float = 0.12, w_n: float = 0.12
+    ) -> tuple[Path, Path, Path]:
         config_path = root / "config.toml"
         config_path.write_text(
-            """
+            f"""
 [frequency_constants]
 number_of_constants = 20
 f_i = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
@@ -45,8 +47,8 @@ delta_f_i = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
 delta_a_i = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 
 [norm_params_by_category]
-delta_stn = [0.12]
-w_n = [0.12]
+delta_stn = [{delta_stn}]
+w_n = [{w_n}]
 
 [norm_noise_by_line.symmetrical]
 values = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
@@ -56,11 +58,11 @@ values = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 values = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 
 [line.symmetrical]
-names = ["ЛВС {} - {}"]
+names = ["ЛВС {{}} - {{}}"]
 [line.asymmetrical]
 names = ["Антенный кабель"]
 [line.power]
-names = ["Электропитание ({})", "Заземление"]
+names = ["Электропитание ({{}})", "Заземление"]
 
 [operation_modes]
 modes = ["ХХ", "ДР", "РР"]
@@ -91,12 +93,53 @@ OBJECT_NAME = "Наименование объекта"
                 0,
                 "power",
                 "voltage",
+                resistance=50.0,
             )
             self.assertEqual(len(result.points), 20)
             self.assertEqual(result.points[0].u_s, 0.0)
             self.assertAlmostEqual(result.points[0].q, 0.9487, places=4)
             self.assertTrue(result.points[0].is_violation)
             self.assertEqual(result.measurement_type, "voltage")
+            self.assertIsNotNone(result.w)
+            self.assertIsNotNone(result.points[0].r_i)
+
+    def test_calculation_without_violations_skips_w_and_r_i(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # High delta_stn so q < delta_stn
+            config_path, sn_path, noise_path = self._create_test_config_and_spectrums(
+                root, delta_stn=100.0, w_n=1.0
+            )
+
+            result = calculate(
+                sn_path,
+                noise_path,
+                load_config(config_path),
+                0,
+                "power",
+                "voltage",
+                resistance=50.0,
+            )
+            self.assertFalse(result.has_violations)
+            self.assertIsNone(result.w)
+            self.assertIsNone(result.w_n)
+            self.assertIsNone(result.is_w_violation)
+            self.assertIsNone(result.points[0].r_i)
+
+    def test_calculation_requires_positive_resistance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path, sn_path, noise_path = self._create_test_config_and_spectrums(root)
+            config = load_config(config_path)
+
+            with self.assertRaises(ValueError):
+                _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=None)
+
+            with self.assertRaises(ValueError):
+                _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=0.0)
+
+            with self.assertRaises(ValueError):
+                _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=-10.0)
 
     def test_calculation_separate_pipelines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,7 +176,14 @@ OBJECT_NAME = "Наименование объекта"
             self.assertEqual(res_current.measurement_type, "current")
             self.assertEqual(res_current.points[0].i_s, 0.0)
 
-            res_voltage = calculate_voltage(sn_path, noise_path, config, 0, "power")
+            res_voltage = calculate_voltage(
+                sn_path,
+                noise_path,
+                config,
+                0,
+                "power",
+                resistance=50.0,
+            )
             self.assertEqual(res_voltage.measurement_type, "voltage")
 
     def test_table_model_columns_visibility(self) -> None:
@@ -143,22 +193,18 @@ OBJECT_NAME = "Наименование объекта"
             config = load_config(config_path)
 
             model = MeasurementTableModel()
-            # 1. At startup: no columns
             self.assertEqual(model.columnCount(), 0)
 
-            # 2. Voltage calculation shows U_* columns
-            res_v = calculate(sn_path, noise_path, config, 0, "power", "voltage")
+            res_v = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=50.0)
             model.update_data(res_v.points, res_v.measurement_type)
             self.assertEqual(model.columnCount(), 7)
             self.assertEqual(model.headerData(3, Qt.Orientation.Horizontal), "U_сш")
 
-            # 3. Current calculation shows I_* columns
-            res_i = calculate(sn_path, noise_path, config, 0, "power", "current")
+            res_i = calculate(sn_path, noise_path, config, 0, "power", "current", resistance=50.0)
             model.update_data(res_i.points, res_i.measurement_type)
             self.assertEqual(model.columnCount(), 7)
             self.assertEqual(model.headerData(3, Qt.Orientation.Horizontal), "I_сш")
 
-            # 4. Cleared model shows 0 columns
             model.clear()
             self.assertEqual(model.columnCount(), 0)
 
