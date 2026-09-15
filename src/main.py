@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -5,6 +6,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from config.config_loader import load_config
+from database.database import init_database
 from ui.main_window import MainWindow
 from ui.startup_dialog import StartupDialog
 
@@ -28,6 +30,12 @@ def main() -> int:
         config = load_config(config_path)
     except (OSError, ValueError) as error:
         _ = QMessageBox.critical(None, "Ошибка конфигурации", str(error))
+        return 1
+
+    try:
+        init_database(base_dir / "measurements.db")
+    except (OSError, sqlite3.Error) as error:
+        _ = QMessageBox.critical(None, "Ошибка базы данных", str(error))
         return 1
 
     startup = StartupDialog()

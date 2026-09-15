@@ -44,6 +44,12 @@ def init_database(db_path: Path) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_measurement_points_measurement_id
+            ON measurement_points(measurement_id)
+            """
+        )
         connection.commit()
 
 
@@ -59,9 +65,8 @@ def save_measurement(
     resistance: float,
     result: CalculationResult,
 ) -> int:
-    init_database(db_path)
-
     with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
         is_w_viol = int(result.is_w_violation) if result.is_w_violation is not None else None
         cursor = connection.execute(
             """

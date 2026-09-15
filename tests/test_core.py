@@ -1,8 +1,9 @@
+import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import override
+from typing import Protocol, cast, override
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -12,9 +13,17 @@ from calculation.calculation import calculate, calculate_current, calculate_volt
 from calculation.calculator_current import calculate_current_q
 from calculation.calculator_voltage import calculate_voltage_q
 from config.config_loader import load_config
+from database.database import init_database, save_measurement
 from spectrum_io.spectrum_reader import read_required_frequencies
 from ui.file_drop_line_edit import extract_local_file
 from ui.table_model import MeasurementTableModel
+
+
+class TypedCursor(Protocol):
+    """Protocol to isolate untyped sqlite3 cursor methods from reportAny."""
+
+    def execute(self, sql: str, parameters: tuple[object, ...], /) -> "TypedCursor": ...
+    def fetchone(self) -> tuple[int, ...] | None: ...
 
 
 class FakeMimeData(QMimeData):
@@ -106,7 +115,6 @@ OBJECT_NAME = "Наименование объекта"
     def test_calculation_without_violations_skips_w_and_r_i(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            # High delta_stn so q < delta_stn
             config_path, sn_path, noise_path = self._create_test_config_and_spectrums(
                 root, delta_stn=100.0, w_n=1.0
             )
@@ -253,6 +261,51 @@ OBJECT_NAME = "Наименование объекта"
                 [QUrl.fromLocalFile(str(file_1)), QUrl.fromLocalFile(str(file_2))]
             )
             self.assertIsNone(extract_local_file(mime_multiple))
+
+    def test_database_persistence_and_cascading_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test_measurements.db"
+            init_database(db_path)
+
+            config_path, sn_path, noise_path = self._create_test_config_and_spectrums(Path(tmp))
+            config = load_config(config_path)
+            res = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=50.0)
+
+            measurement_id = save_measurement(
+                db_path=db_path,
+                device_name="Test Device",
+                category=1,
+                line_number=1,
+                line_name="Line 1",
+                line_type="power",
+                operation_mode="XX",
+                measurement_type=1,
+                resistance=50.0,
+                result=res,
+            )
+            self.assertGreater(measurement_id, 0)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                cursor = cast(TypedCursor, conn.cursor())
+                row = cursor.execute(
+                    "SELECT COUNT(*) FROM measurement_points WHERE measurement_id = ?",
+                    (measurement_id,),
+                ).fetchone()
+                if row is None:
+                    self.fail("Expected count query result, got None")
+                self.assertEqual(row[0], 20)
+
+                _ = conn.execute("DELETE FROM measurements WHERE id = ?", (measurement_id,))
+                conn.commit()
+
+                row_after = cursor.execute(
+                    "SELECT COUNT(*) FROM measurement_points WHERE measurement_id = ?",
+                    (measurement_id,),
+                ).fetchone()
+                if row_after is None:
+                    self.fail("Expected count query result after delete, got None")
+                self.assertEqual(row_after[0], 0)
 
 
 if __name__ == "__main__":
