@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -19,11 +20,13 @@ def get_base_dir() -> Path:
 
 
 def main() -> int:
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
+
     app = QApplication(sys.argv)
     _ = app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 9))
 
-    base_dir = get_base_dir()
     config_path = base_dir / "config.toml"
 
     try:

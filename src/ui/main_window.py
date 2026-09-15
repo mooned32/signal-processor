@@ -1,9 +1,9 @@
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, override
 
-from PyQt6.QtGui import QDoubleValidator
+from PyQt6.QtGui import QCloseEvent, QDoubleValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -95,6 +95,23 @@ class MainWindow(QMainWindow):
         self._initialize_ui()
         self._load_operation_modes()
         self._update_window_title()
+
+    @override
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        if a0 is None:
+            return
+        if self.calculation_result is not None:
+            reply = QMessageBox.question(
+                self,
+                "Подтверждение выхода",
+                "Присутствуют несохранённые результаты расчёта.\nВы действительно хотите выйти?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                a0.ignore()
+                return
+        a0.accept()
 
     def _update_window_title(self) -> None:
         self.setWindowTitle(f"{self.device_name}: (Линия №{self.line_number})")
@@ -346,6 +363,7 @@ class MainWindow(QMainWindow):
         index = self.line_combo.currentIndex()
         line_name = self.line_template.full_name()
         mode = self.operation_mode.currentText()
+        measurement_type_name = "Ток" if self.current_radio.isChecked() else "Напряжение"
 
         try:
             save_measurement(
@@ -356,7 +374,7 @@ class MainWindow(QMainWindow):
                 line_name=line_name,
                 line_type=self._current_line_type() if index >= 0 else "power",
                 operation_mode=mode,
-                measurement_type=self.measurement_group.checkedId(),
+                measurement_type=measurement_type_name,
                 resistance=resistance,
                 result=self.calculation_result,
             )
@@ -370,3 +388,6 @@ class MainWindow(QMainWindow):
         self.calculation_result = None
         self.table_model.clear()
         self.save_button.setEnabled(False)
+
+        self.resistance_edit.clear()
+        self.line_template.clear_inputs()

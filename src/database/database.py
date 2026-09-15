@@ -17,7 +17,7 @@ def init_database(db_path: Path) -> None:
                 line_name TEXT NOT NULL,
                 line_type TEXT NOT NULL,
                 operation_mode TEXT NOT NULL,
-                measurement_type INTEGER NOT NULL,
+                measurement_type TEXT NOT NULL,
                 parameter_r REAL NOT NULL,
                 has_violations INTEGER NOT NULL,
                 w REAL,
@@ -61,7 +61,7 @@ def save_measurement(
     line_name: str,
     line_type: LineType,
     operation_mode: str,
-    measurement_type: int,
+    measurement_type: str,
     resistance: float,
     result: CalculationResult,
 ) -> int:

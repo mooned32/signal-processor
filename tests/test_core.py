@@ -279,7 +279,7 @@ OBJECT_NAME = "Наименование объекта"
                 line_name="Line 1",
                 line_type="power",
                 operation_mode="XX",
-                measurement_type=1,
+                measurement_type="Напряжение",
                 resistance=50.0,
                 result=res,
             )

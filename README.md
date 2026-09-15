@@ -56,7 +56,7 @@ uv run python src/main.py
 PyInstaller собирает приложение для платформы, на которой запускается сборка.
 
 ```sh
-uv sync
+uv sync --group build
 uv run pyinstaller --clean SignalProcessor.spec
 ```
 
