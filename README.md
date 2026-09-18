@@ -51,6 +51,24 @@ uv sync
 uv run python src/main.py
 ```
 
+## Тестирование
+
+Запуск всех тестов:
+
+```sh
+uv run python -m unittest discover -s tests
+```
+
+Запуск отдельного тестового модуля:
+
+```sh
+uv run python -m unittest tests/test_calculation.py
+uv run python -m unittest tests/test_spectrum_reader.py
+uv run python -m unittest tests/test_config_loader.py
+uv run python -m unittest tests/test_database.py
+uv run python -m unittest tests/test_ui.py
+```
+
 ## Сборка
 
 PyInstaller собирает приложение для платформы, на которой запускается сборка.
