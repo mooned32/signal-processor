@@ -23,9 +23,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from calculation.calculation import calculate
-from calculation.models import AppConfig, CalculationResult, LineType, MeasurementKind
-from database.database import save_measurement
+from calculation import calculate
+from database import save_measurement
+from models import AppConfig, CalculationResult, LineType, MeasurementKind
 from ui.file_drop_line_edit import FileDropLineEdit
 from ui.line_template_widget import LineTemplateWidget
 from ui.table_model import MeasurementTableModel

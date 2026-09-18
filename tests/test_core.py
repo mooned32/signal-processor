@@ -9,12 +9,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 
-from calculation.calculation import calculate, calculate_current, calculate_voltage
-from calculation.calculator_current import calculate_current_q
-from calculation.calculator_voltage import calculate_voltage_q
-from config.config_loader import load_config
-from database.database import init_database, save_measurement
-from spectrum_io.spectrum_reader import read_required_frequencies
+from calculation import (
+    calculate,
+    calculate_intermediate_u,
+    calculate_q,
+    calculate_w,
+)
+from config_loader import load_config
+from database import init_database, save_measurement
+from spectrum_reader import read_required_frequencies
 from ui.file_drop_line_edit import extract_local_file
 from ui.table_model import MeasurementTableModel
 
@@ -53,6 +56,7 @@ class CoreTests(unittest.TestCase):
 number_of_constants = 20
 f_i = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
 delta_f_i = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+k_i = [0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1]
 delta_a_i = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 
 [norm_params_by_category]
@@ -75,12 +79,6 @@ names = ["Электропитание ({{}})", "Заземление"]
 
 [operation_modes]
 modes = ["ХХ", "ДР", "РР"]
-
-[report_fields]
-ACT_NUMBER = "Номер акта"
-DATE = "Дата измерения"
-OPERATOR = "ФИО оператора"
-OBJECT_NAME = "Наименование объекта"
 """.strip(),
             encoding="utf-8",
         )
@@ -106,11 +104,11 @@ OBJECT_NAME = "Наименование объекта"
             )
             self.assertEqual(len(result.points), 20)
             self.assertEqual(result.points[0].u_s, 0.0)
-            self.assertAlmostEqual(result.points[0].q, 0.9487, places=4)
-            self.assertTrue(result.points[0].is_violation)
+            self.assertEqual(result.points[0].q, 0.0)
+            self.assertFalse(result.points[0].is_violation)
             self.assertEqual(result.measurement_type, "voltage")
-            self.assertIsNotNone(result.w)
-            self.assertIsNotNone(result.points[0].r_i)
+            self.assertIsNone(result.w)
+            self.assertIsNone(result.points[0].r_i)
 
     def test_calculation_without_violations_skips_w_and_r_i(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,50 +147,28 @@ OBJECT_NAME = "Наименование объекта"
             with self.assertRaises(ValueError):
                 _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=-10.0)
 
-    def test_calculation_separate_pipelines(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config_path, sn_path, noise_path = self._create_test_config_and_spectrums(root)
-            config = load_config(config_path)
+    def test_unified_q_and_w_interfaces(self) -> None:
+        u_val = calculate_intermediate_u(1.12, "symmetrical")
+        self.assertEqual(u_val, 1.12)
 
-            q_v = calculate_voltage_q(
-                u_s=1.5,
-                frequency=500.0,
-                delta_f=500.0,
-                delta_a=1.12,
-                norm_noise=1.12,
-            )
-            q_i = calculate_current_q(
-                i_s=1.5,
-                frequency=500.0,
-                delta_f=500.0,
-                delta_a=1.12,
-                norm_noise=1.12,
-                resistance=50.0,
-            )
-            self.assertIsInstance(q_v, float)
-            self.assertIsInstance(q_i, float)
+        q_v = calculate_q(
+            signal_level=2.24,
+            intermediate_u=u_val,
+            measurement_type="voltage",
+            resistance=50.0,
+        )
+        self.assertAlmostEqual(q_v, 2.0, places=4)
 
-            res_current = calculate_current(
-                sn_path,
-                noise_path,
-                config,
-                0,
-                "power",
-                resistance=50.0,
-            )
-            self.assertEqual(res_current.measurement_type, "current")
-            self.assertEqual(res_current.points[0].i_s, 0.0)
+        q_i = calculate_q(
+            signal_level=2.0,
+            intermediate_u=u_val,
+            measurement_type="current",
+            resistance=50.0,
+        )
+        self.assertAlmostEqual(q_i, (2.0 * 50.0) / 1.12, places=4)
 
-            res_voltage = calculate_voltage(
-                sn_path,
-                noise_path,
-                config,
-                0,
-                "power",
-                resistance=50.0,
-            )
-            self.assertEqual(res_voltage.measurement_type, "voltage")
+        w = calculate_w(15.5)
+        self.assertEqual(w, 15.5)
 
     def test_table_model_columns_visibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,6 +209,7 @@ OBJECT_NAME = "Наименование объекта"
         self.assertEqual(config.frequency_constants.number_of_constants, 20)
         self.assertEqual(len(config.frequency_constants.f_i), 20)
         self.assertEqual(len(config.frequency_constants.delta_f_i), 20)
+        self.assertEqual(len(config.frequency_constants.k_i), 20)
         self.assertEqual(len(config.norm_noise_by_line.symmetrical), 20)
         self.assertEqual(len(config.norm_noise_by_line.asymmetrical), 20)
         self.assertEqual(len(config.norm_noise_by_line.power), 20)

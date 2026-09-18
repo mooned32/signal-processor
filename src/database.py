@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from calculation.models import CalculationResult, LineType
+from models import CalculationResult, LineType
 
 
 def init_database(db_path: Path) -> None:

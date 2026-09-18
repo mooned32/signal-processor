@@ -10,6 +10,7 @@ class FrequencyConstantsConfig:
     number_of_constants: int
     f_i: list[float]
     delta_f_i: list[float]
+    k_i: list[float]
     delta_a_i: list[float]
 
 
@@ -34,21 +35,12 @@ class NormNoiseByLineConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ReportFields:
-    act_number: str
-    date: str
-    operator_name: str
-    object_name: str
-
-
-@dataclass(frozen=True, slots=True)
 class AppConfig:
     frequency_constants: FrequencyConstantsConfig
     norm_params: NormParamsConfig
     norm_noise_by_line: NormNoiseByLineConfig
     lines: LineConfig
     operation_modes: list[str]
-    report_fields: ReportFields
 
 
 @dataclass(frozen=True, slots=True)

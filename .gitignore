@@ -16,3 +16,7 @@ wheels/
 
 # Ruff
 .ruff_cache
+
+# Other files
+*.txt
+*.exe

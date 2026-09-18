@@ -3,7 +3,7 @@ from typing import override
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt
 from PyQt6.QtGui import QColor
 
-from calculation.models import MeasurementKind, MeasurementPoint
+from models import MeasurementKind, MeasurementPoint
 
 
 class MeasurementTableModel(QAbstractTableModel):

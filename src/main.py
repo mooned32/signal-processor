@@ -6,8 +6,8 @@ from pathlib import Path
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from config.config_loader import load_config
-from database.database import init_database
+from config_loader import load_config
+from database import init_database
 from ui.main_window import MainWindow
 from ui.startup_dialog import StartupDialog
 

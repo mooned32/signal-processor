@@ -2,14 +2,13 @@ import tomllib
 from pathlib import Path
 from typing import cast
 
-from calculation.calculation import FREQUENCY_COUNT
-from calculation.models import (
+from calculation import FREQUENCY_COUNT
+from models import (
     AppConfig,
     FrequencyConstantsConfig,
     LineConfig,
     NormNoiseByLineConfig,
     NormParamsConfig,
-    ReportFields,
 )
 
 
@@ -43,12 +42,6 @@ def _string_list(value: object, key: str) -> list[str]:
     return result
 
 
-def _string(value: object, key: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"Параметр {key} должен быть строкой")
-    return value
-
-
 def load_config(config_path: Path) -> AppConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Конфигурационный файл не найден: {config_path}")
@@ -69,6 +62,7 @@ def load_config(config_path: Path) -> AppConfig:
         number_of_constants=number_of_constants,
         f_i=_float_list(frequency_raw.get("f_i"), "f_i"),
         delta_f_i=_float_list(frequency_raw.get("delta_f_i"), "delta_f_i"),
+        k_i=_float_list(frequency_raw.get("k_i"), "k_i"),
         delta_a_i=_float_list(frequency_raw.get("delta_a_i"), "delta_a_i"),
     )
 
@@ -114,17 +108,10 @@ def load_config(config_path: Path) -> AppConfig:
     modes_raw = _require_dict(raw_dict.get("operation_modes"), "operation_modes")
     operation_modes = _string_list(modes_raw.get("modes"), "operation_modes.modes")
 
-    report_raw = _require_dict(raw_dict.get("report_fields"), "report_fields")
-    report_fields = ReportFields(
-        act_number=_string(report_raw.get("ACT_NUMBER"), "report_fields.ACT_NUMBER"),
-        date=_string(report_raw.get("DATE"), "report_fields.DATE"),
-        operator_name=_string(report_raw.get("OPERATOR"), "report_fields.OPERATOR"),
-        object_name=_string(report_raw.get("OBJECT_NAME"), "report_fields.OBJECT_NAME"),
-    )
-
     if (
         len(frequency_config.f_i) != FREQUENCY_COUNT
         or len(frequency_config.delta_f_i) != FREQUENCY_COUNT
+        or len(frequency_config.k_i) != FREQUENCY_COUNT
         or len(frequency_config.delta_a_i) != FREQUENCY_COUNT
     ):
         raise ValueError("frequency_constants содержит некорректные массивы")
@@ -135,5 +122,4 @@ def load_config(config_path: Path) -> AppConfig:
         norm_noise_by_line=norm_noise,
         lines=lines,
         operation_modes=operation_modes,
-        report_fields=report_fields,
     )
