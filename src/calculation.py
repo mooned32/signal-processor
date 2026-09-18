@@ -34,7 +34,12 @@ def calculate(
     points: list[MeasurementPoint] = []
     for i in range(len(frequencies)):
         signal_level = _compute_signal_level(sn_values[i], n_values[i])
-        intermediate_u = calculate_intermediate_u(line_noise[i], line_type)
+        intermediate_u = calculate_intermediate_u(
+            resistance=valid_r,
+            delta_f=delta_f_vals[i],
+            norm_noise=line_noise[i],
+            line_type=line_type,
+        )
         q = calculate_q(signal_level, intermediate_u, measurement_type, valid_r)
         points.append(
             MeasurementPoint(
@@ -53,7 +58,12 @@ def calculate(
     return _finalize_result(points, delta_a_vals, k_vals, measurement_type, w_n)
 
 
-def calculate_intermediate_u(norm_noise: float, line_type: LineType) -> float:
+def calculate_intermediate_u(
+    resistance: float,
+    delta_f: float,
+    norm_noise: float,
+    line_type: LineType,
+) -> float:
     match line_type:
         case "symmetrical" | "asymmetrical":
             return norm_noise
