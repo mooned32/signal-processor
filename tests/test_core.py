@@ -17,6 +17,13 @@ from calculation import (
 )
 from config_loader import load_config
 from database import init_database, save_measurement
+from error import (
+    CalculationError,
+    ConfigNotFoundError,
+    ConfigValidationError,
+    SpectrumMissingFrequencyError,
+    SpectrumNotFoundError,
+)
 from spectrum_reader import read_required_frequencies
 from ui.file_drop_line_edit import extract_local_file
 from ui.table_model import MeasurementTableModel
@@ -138,13 +145,13 @@ modes = ["ХХ", "ДР", "РР"]
             config_path, sn_path, noise_path = self._create_test_config_and_spectrums(root)
             config = load_config(config_path)
 
-            with self.assertRaises(ValueError):
+            with self.assertRaises(CalculationError):
                 _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=None)
 
-            with self.assertRaises(ValueError):
+            with self.assertRaises(CalculationError):
                 _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=0.0)
 
-            with self.assertRaises(ValueError):
+            with self.assertRaises(CalculationError):
                 _ = calculate(sn_path, noise_path, config, 0, "power", "voltage", resistance=-10.0)
 
     def test_unified_q_and_w_interfaces(self) -> None:
@@ -204,15 +211,46 @@ modes = ["ХХ", "ДР", "РР"]
             self.assertEqual(values[1], 6172.5)
             self.assertEqual(values[2], 16000.0)
 
+    def test_parser_raises_on_missing_file_and_frequencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            non_existent = Path(tmp) / "does_not_exist.txt"
+            with self.assertRaises(SpectrumNotFoundError):
+                _ = read_required_frequencies(non_existent, list(range(1, 21)))
+
+            incomplete = Path(tmp) / "incomplete.txt"
+            incomplete.write_text("1\t10.0\n2\t20.0\n", encoding="utf-8")
+            with self.assertRaises(SpectrumMissingFrequencyError) as context:
+                _ = read_required_frequencies(incomplete, list(range(1, 21)))
+            self.assertEqual(context.exception.filename, "incomplete.txt")
+            self.assertIn(3, context.exception.missing_frequencies)
+
+    def test_config_loader_validations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_cfg = Path(tmp) / "absent.toml"
+            with self.assertRaises(ConfigNotFoundError):
+                _ = load_config(missing_cfg)
+
+            invalid_syntax = Path(tmp) / "syntax_error.toml"
+            invalid_syntax.write_text("key = [broken", encoding="utf-8")
+            with self.assertRaises(ConfigValidationError):
+                _ = load_config(invalid_syntax)
+
+            bad_structure = Path(tmp) / "bad_structure.toml"
+            bad_structure.write_text("frequency_constants = 123\n", encoding="utf-8")
+            with self.assertRaises(ConfigValidationError):
+                _ = load_config(bad_structure)
+
     def test_config_contains_expected_frequency_count(self) -> None:
         config = load_config(Path(__file__).resolve().parent.parent / "config.toml")
-        self.assertEqual(config.frequency_constants.number_of_constants, 20)
-        self.assertEqual(len(config.frequency_constants.f_i), 20)
-        self.assertEqual(len(config.frequency_constants.delta_f_i), 20)
-        self.assertEqual(len(config.frequency_constants.k_i), 20)
-        self.assertEqual(len(config.norm_noise_by_line.symmetrical), 20)
-        self.assertEqual(len(config.norm_noise_by_line.asymmetrical), 20)
-        self.assertEqual(len(config.norm_noise_by_line.power), 20)
+        count = config.frequency_constants.number_of_constants
+        self.assertGreater(count, 0)
+        self.assertEqual(len(config.frequency_constants.f_i), count)
+        self.assertEqual(len(config.frequency_constants.delta_f_i), count)
+        self.assertEqual(len(config.frequency_constants.k_i), count)
+        self.assertEqual(len(config.frequency_constants.delta_a_i), count)
+        self.assertEqual(len(config.norm_noise_by_line.symmetrical), count)
+        self.assertEqual(len(config.norm_noise_by_line.asymmetrical), count)
+        self.assertEqual(len(config.norm_noise_by_line.power), count)
 
     def test_extract_local_file(self) -> None:
         with tempfile.NamedTemporaryFile() as tmp:

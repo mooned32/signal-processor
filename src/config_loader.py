@@ -2,7 +2,7 @@ import tomllib
 from pathlib import Path
 from typing import cast
 
-from calculation import FREQUENCY_COUNT
+from error import ConfigNotFoundError, ConfigValidationError
 from models import (
     AppConfig,
     FrequencyConstantsConfig,
@@ -14,49 +14,56 @@ from models import (
 
 def _require_dict(value: object, section: str) -> dict[str, object]:
     if not isinstance(value, dict):
-        raise ValueError(f"Секция [{section}] отсутствует или имеет некорректный формат")
+        raise ConfigValidationError(f"Секция [{section}] отсутствует или имеет некорректный формат")
     return cast(dict[str, object], value)
 
 
 def _float_list(value: object, key: str) -> list[float]:
     if not isinstance(value, list):
-        raise ValueError(f"Параметр {key} должен быть массивом чисел")
+        raise ConfigValidationError(f"Параметр '{key}' должен быть списком чисел.")
     items = cast(list[object], value)
     result: list[float] = []
     for item in items:
         if isinstance(item, bool) or not isinstance(item, (int, float)):
-            raise ValueError(f"Параметр {key} содержит значение нечислового типа")
+            raise ConfigValidationError(f"Параметр '{key}' содержит нечисловое значение.")
         result.append(float(item))
     return result
 
 
 def _string_list(value: object, key: str) -> list[str]:
     if not isinstance(value, list):
-        raise ValueError(f"Параметр {key} должен быть массивом строк")
+        raise ConfigValidationError(f"Параметр '{key}' должен быть списком строк.")
     items = cast(list[object], value)
     result: list[str] = []
     for item in items:
         if not isinstance(item, str):
-            raise ValueError(f"Параметр {key} содержит значение нестрокового типа")
+            raise ConfigValidationError(f"Параметр '{key}' содержит нестроковое значение.")
         result.append(item)
     return result
 
 
 def load_config(config_path: Path) -> AppConfig:
     if not config_path.exists():
-        raise FileNotFoundError(f"Конфигурационный файл не найден: {config_path}")
+        raise ConfigNotFoundError(str(config_path))
 
-    with config_path.open("rb") as config_file:
-        raw_data: object = tomllib.load(config_file)
+    try:
+        with config_path.open("rb") as config_file:
+            raw_data: object = tomllib.load(config_file)
+    except tomllib.TOMLDecodeError as err:
+        raise ConfigValidationError(
+            f"Синтаксическая ошибка в конфигурационном файле: {err}"
+        ) from err
+    except OSError as err:
+        raise ConfigValidationError(f"Не удалось прочитать конфигурационный файл: {err}") from err
 
     raw_dict = _require_dict(raw_data, "root")
 
     frequency_raw = _require_dict(raw_dict.get("frequency_constants"), "frequency_constants")
     number_of_constants = frequency_raw.get("number_of_constants")
     if isinstance(number_of_constants, bool) or not isinstance(number_of_constants, int):
-        raise ValueError("number_of_constants должен быть целым числом")
-    if number_of_constants != FREQUENCY_COUNT:
-        raise ValueError("number_of_constants must be exactly 20.")
+        raise ConfigValidationError("Параметр 'number_of_constants' должен быть целым числом.")
+    if number_of_constants <= 0:
+        raise ConfigValidationError("Параметр 'number_of_constants' должен быть больше нуля.")
 
     frequency_config = FrequencyConstantsConfig(
         number_of_constants=number_of_constants,
@@ -65,6 +72,16 @@ def load_config(config_path: Path) -> AppConfig:
         k_i=_float_list(frequency_raw.get("k_i"), "k_i"),
         delta_a_i=_float_list(frequency_raw.get("delta_a_i"), "delta_a_i"),
     )
+
+    if (
+        len(frequency_config.f_i) != number_of_constants
+        or len(frequency_config.delta_f_i) != number_of_constants
+        or len(frequency_config.k_i) != number_of_constants
+        or len(frequency_config.delta_a_i) != number_of_constants
+    ):
+        raise ConfigValidationError(
+            f"Константы частот должны содержать ровно по {number_of_constants} значений."
+        )
 
     norm_raw = _require_dict(raw_dict.get("norm_params_by_category"), "norm_params_by_category")
     norm_config = NormParamsConfig(
@@ -88,11 +105,12 @@ def load_config(config_path: Path) -> AppConfig:
         power=_float_list(power_raw.get("values"), "norm_noise_by_line.power.values"),
     )
     if not all(
-        len(values) == FREQUENCY_COUNT
+        len(values) == number_of_constants
         for values in (norm_noise.symmetrical, norm_noise.asymmetrical, norm_noise.power)
     ):
-        raise ValueError(
-            "В [norm_noise_by_line] списки values должны содержать ровно по 20 значений!"
+        raise ConfigValidationError(
+            "Списки values в [norm_noise_by_line] должны содержать по "
+            + f"{number_of_constants} значений."
         )
 
     line_raw = _require_dict(raw_dict.get("line"), "line")
@@ -107,14 +125,6 @@ def load_config(config_path: Path) -> AppConfig:
 
     modes_raw = _require_dict(raw_dict.get("operation_modes"), "operation_modes")
     operation_modes = _string_list(modes_raw.get("modes"), "operation_modes.modes")
-
-    if (
-        len(frequency_config.f_i) != FREQUENCY_COUNT
-        or len(frequency_config.delta_f_i) != FREQUENCY_COUNT
-        or len(frequency_config.k_i) != FREQUENCY_COUNT
-        or len(frequency_config.delta_a_i) != FREQUENCY_COUNT
-    ):
-        raise ValueError("frequency_constants содержит некорректные массивы")
 
     return AppConfig(
         frequency_constants=frequency_config,

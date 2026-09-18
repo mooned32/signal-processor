@@ -1,6 +1,7 @@
 import math
 from pathlib import Path
 
+from error import CalculationError
 from models import (
     AppConfig,
     CalculationResult,
@@ -9,8 +10,6 @@ from models import (
     MeasurementPoint,
 )
 from spectrum_reader import read_required_frequencies
-
-FREQUENCY_COUNT = 20
 
 
 def calculate_intermediate_u(norm_noise: float, line_type: LineType) -> float:
@@ -78,28 +77,34 @@ def _validate_inputs(
     resistance: float | None,
 ) -> tuple[list[float], list[float], list[float], list[float], list[float], float, float, float]:
     if resistance is None or resistance <= 0.0:
-        raise ValueError("Параметр сопротивления R должен быть больше нуля.")
+        raise CalculationError("Параметр сопротивления R должен быть больше нуля.")
+
+    expected_count = config.frequency_constants.number_of_constants
+    if expected_count <= 0:
+        raise CalculationError("Параметр 'number_of_constants' должен быть больше нуля.")
 
     line_noise = _select_line_noise(config, line_type)
-    if len(line_noise) != FREQUENCY_COUNT:
-        raise ValueError("В конфигурации нормированный шум должен содержать ровно 20 значений.")
+    if len(line_noise) != expected_count:
+        raise CalculationError(
+            f"В конфигурации нормированный шум должен содержать ровно {expected_count} значений."
+        )
 
     frequencies = config.frequency_constants.f_i
     delta_frequencies = config.frequency_constants.delta_f_i
     k_values = config.frequency_constants.k_i
     delta_a_values = config.frequency_constants.delta_a_i
     if (
-        len(frequencies) != FREQUENCY_COUNT
-        or len(delta_frequencies) != FREQUENCY_COUNT
-        or len(k_values) != FREQUENCY_COUNT
-        or len(delta_a_values) != FREQUENCY_COUNT
+        len(frequencies) != expected_count
+        or len(delta_frequencies) != expected_count
+        or len(k_values) != expected_count
+        or len(delta_a_values) != expected_count
     ):
-        raise ValueError("Константы частот должны содержать по 20 значений.")
+        raise CalculationError(f"Константы частот должны содержать по {expected_count} значений.")
 
     delta_stn = config.norm_params.delta_stn
     w_n_values = config.norm_params.w_n
     if not (0 <= category_index < len(delta_stn) and 0 <= category_index < len(w_n_values)):
-        raise ValueError(f"Категория {category_index + 1} отсутствует в параметрах нормы.")
+        raise CalculationError(f"Категория {category_index + 1} отсутствует в параметрах нормы.")
 
     return (
         frequencies,
@@ -181,7 +186,7 @@ def calculate(
     n_values = read_required_frequencies(noise_path, frequencies)
 
     points: list[MeasurementPoint] = []
-    for i in range(FREQUENCY_COUNT):
+    for i in range(len(frequencies)):
         signal_level = _compute_signal_level(sn_values[i], n_values[i])
         intermediate_u = calculate_intermediate_u(line_noise[i], line_type)
         q = calculate_q(signal_level, intermediate_u, measurement_type, valid_r)

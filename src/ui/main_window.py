@@ -1,9 +1,9 @@
-import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, override
 
-from PyQt6.QtGui import QCloseEvent, QDoubleValidator
+from PyQt6.QtCore import QLocale, QObject
+from PyQt6.QtGui import QCloseEvent, QDoubleValidator, QValidator
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -25,10 +25,34 @@ from PyQt6.QtWidgets import (
 
 from calculation import calculate
 from database import save_measurement
+from error import CalculationError, DatabaseError, SignalProcessorError, SpectrumError
 from models import AppConfig, CalculationResult, LineType, MeasurementKind
 from ui.file_drop_line_edit import FileDropLineEdit
 from ui.line_template_widget import LineTemplateWidget
 from ui.table_model import MeasurementTableModel
+
+
+class DoubleValidator(QDoubleValidator):
+    """Double validator with neutral C-locale that accepts both dot and comma."""
+
+    def __init__(
+        self,
+        bottom: float,
+        top: float,
+        decimals: int,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(bottom, top, decimals, parent)
+        self.setLocale(QLocale.c())
+        self.setNotation(QDoubleValidator.Notation.StandardNotation)
+
+    @override
+    def validate(self, a0: str | None, a1: int) -> tuple[QValidator.State, str, int]:
+        if a0 is None:
+            return QValidator.State.Invalid, "", a1
+        normalized = a0.replace(",", ".")
+        state, _, new_pos = super().validate(normalized, a1)
+        return state, a0, new_pos
 
 
 class VoidSignal(Protocol):
@@ -101,14 +125,17 @@ class MainWindow(QMainWindow):
         if a0 is None:
             return
         if self.calculation_result is not None:
-            reply = QMessageBox.question(
-                self,
-                "Подтверждение выхода",
-                "Присутствуют несохранённые результаты расчёта.\nВы действительно хотите выйти?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            dialog = QMessageBox(self)
+            dialog.setIcon(QMessageBox.Icon.Question)
+            dialog.setWindowTitle("Подтверждение выхода")
+            dialog.setText(
+                "Присутствуют несохранённые результаты расчёта.\nВы действительно хотите выйти?"
             )
-            if reply != QMessageBox.StandardButton.Yes:
+            yes_button = dialog.addButton("Да", QMessageBox.ButtonRole.YesRole)
+            no_button = dialog.addButton("Нет", QMessageBox.ButtonRole.NoRole)
+            dialog.setDefaultButton(no_button)
+            _ = dialog.exec()
+            if dialog.clickedButton() != yes_button:
                 a0.ignore()
                 return
         a0.accept()
@@ -170,7 +197,9 @@ class MainWindow(QMainWindow):
         params_row.addSpacing(18)
         params_row.addWidget(QLabel("Сопротивление R:", box))
         self.resistance_edit.setFixedWidth(80)
-        self.resistance_edit.setValidator(QDoubleValidator(0.0, 1e9, 4, self.resistance_edit))
+
+        # Разрешить неотрицательные float с точкой или запятой через C-локаль
+        self.resistance_edit.setValidator(DoubleValidator(0.0, 1e9, 4, self.resistance_edit))
         params_row.addWidget(self.resistance_edit)
         params_row.addWidget(QLabel("Ом", box))
         params_row.addStretch()
@@ -323,8 +352,14 @@ class MainWindow(QMainWindow):
                 measurement_type=measurement_type,
                 resistance=resistance,
             )
-        except (FileNotFoundError, ValueError) as error:
+        except SpectrumError as error:
+            _ = QMessageBox.critical(self, "Ошибка спектральных данных", str(error))
+            return
+        except CalculationError as error:
             _ = QMessageBox.critical(self, "Ошибка расчёта", str(error))
+            return
+        except SignalProcessorError as error:
+            _ = QMessageBox.critical(self, "Ошибка обработки данных", str(error))
             return
 
         self.calculation_result = result
@@ -378,7 +413,10 @@ class MainWindow(QMainWindow):
                 resistance=resistance,
                 result=self.calculation_result,
             )
-        except (OSError, sqlite3.Error, RuntimeError) as error:
+        except DatabaseError as error:
+            _ = QMessageBox.critical(self, "Ошибка базы данных", str(error))
+            return
+        except SignalProcessorError as error:
             _ = QMessageBox.critical(self, "Ошибка сохранения", str(error))
             return
 
