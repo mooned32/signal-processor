@@ -1,4 +1,4 @@
-# Signal Processor
+# SignalProcessor
 
 Десктопное приложение для анализа спектров.
 

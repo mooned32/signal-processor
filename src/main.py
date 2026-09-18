@@ -19,7 +19,6 @@ def handle_unhandled_exception(
     exc_value: BaseException,
     exc_traceback: TracebackType | None,
 ) -> None:
-    """Show unhandled exceptions in a critical message dialog with stack trace."""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
@@ -36,7 +35,6 @@ def handle_unhandled_exception(
 
 
 def get_base_dir() -> Path:
-    """Return the directory containing config.toml for dev and PyInstaller modes."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent

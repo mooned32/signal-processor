@@ -30,15 +30,11 @@ from ui.table_model import MeasurementTableModel
 
 
 class TypedCursor(Protocol):
-    """Protocol to isolate untyped sqlite3 cursor methods from reportAny."""
-
     def execute(self, sql: str, parameters: tuple[object, ...], /) -> "TypedCursor": ...
     def fetchone(self) -> tuple[int, ...] | None: ...
 
 
 class FakeMimeData(QMimeData):
-    """Type-safe MIME data test double without untyped method signatures."""
-
     def __init__(self, urls: list[QUrl] | None = None) -> None:
         super().__init__()
         self._urls: list[QUrl] = [] if urls is None else urls

@@ -1,5 +1,5 @@
 class SignalProcessorError(Exception):
-    """Базовый класс для всех исключений приложения Signal Processor."""
+    """Базовый класс для всех исключений приложения SignalProcessor."""
 
 
 class ConfigError(SignalProcessorError):

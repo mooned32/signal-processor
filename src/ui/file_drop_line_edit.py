@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import QLineEdit, QWidget
 
 
 def extract_local_file(mime_data: QMimeData | None) -> Path | None:
-    """Extract a single local file path from MIME data."""
     if mime_data is None or not mime_data.hasUrls():
         return None
     urls = mime_data.urls()
@@ -30,8 +29,6 @@ def extract_local_file(mime_data: QMimeData | None) -> Path | None:
 
 
 class FileDropLineEdit(QLineEdit):
-    """Read-only line edit with middle path elision and drag-and-drop."""
-
     def __init__(
         self,
         placeholder: str,
@@ -46,7 +43,6 @@ class FileDropLineEdit(QLineEdit):
         self.setAcceptDrops(True)
 
     def set_file_path(self, path: Path) -> None:
-        """Store the full path, update tooltip, and set elided display text."""
         self._full_path = str(path.resolve())
         self.setToolTip(self._full_path)
         self._update_display_text()

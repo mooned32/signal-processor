@@ -12,6 +12,10 @@ class LineTemplateWidget(QWidget):
         self._layout.setSpacing(4)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+    # =========================================================================
+    # Публичный API
+    # =========================================================================
+
     def set_template(self, value: str) -> None:
         self._template_string = value
         self._clear_layout()
@@ -47,15 +51,11 @@ class LineTemplateWidget(QWidget):
         if self._inputs:
             self._inputs[0].setFocus()
 
-    def _clear_layout(self) -> None:
-        self._inputs.clear()
-        while self._layout.count() > 0:
-            item = self._layout.takeAt(0)
-            if item is None:
-                continue
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+    def clear_inputs(self) -> None:
+        for input_widget in self._inputs:
+            input_widget.clear()
+        if self._inputs:
+            self._inputs[0].setFocus()
 
     def is_valid(self) -> bool:
         if not self.isVisible() or not self._inputs:
@@ -79,8 +79,16 @@ class LineTemplateWidget(QWidget):
                 input_widget.selectAll()
                 return
 
-    def clear_inputs(self) -> None:
-        for input_widget in self._inputs:
-            input_widget.clear()
-        if self._inputs:
-            self._inputs[0].setFocus()
+    # =========================================================================
+    # Приватные вспомогательные методы для управления разметкой
+    # =========================================================================
+
+    def _clear_layout(self) -> None:
+        self._inputs.clear()
+        while self._layout.count() > 0:
+            item = self._layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()

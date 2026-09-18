@@ -31,10 +31,12 @@ from ui.file_drop_line_edit import FileDropLineEdit
 from ui.line_template_widget import LineTemplateWidget
 from ui.table_model import MeasurementTableModel
 
+# =============================================================================
+# Вспомогательные типы и функции-обертки для сигналов
+# =============================================================================
+
 
 class DoubleValidator(QDoubleValidator):
-    """Double validator with neutral C-locale that accepts both dot and comma."""
-
     def __init__(
         self,
         bottom: float,
@@ -71,7 +73,16 @@ def connect_index(signal: IntSignal, slot: Callable[[int], None]) -> None:
     _ = signal.connect(slot)
 
 
+# =============================================================================
+# Главное окно
+# =============================================================================
+
+
 class MainWindow(QMainWindow):
+    # -------------------------------------------------------------------------
+    # Жизненный цикл и инициализация окна
+    # -------------------------------------------------------------------------
+
     def __init__(
         self,
         config: AppConfig,
@@ -143,13 +154,9 @@ class MainWindow(QMainWindow):
     def _update_window_title(self) -> None:
         self.setWindowTitle(f"{self.device_name}: (Линия №{self.line_number})")
 
-    def _load_line_templates(self) -> None:
-        for name in self.config.lines.symmetrical:
-            self.line_items.append(("symmetrical", name))
-        for name in self.config.lines.asymmetrical:
-            self.line_items.append(("asymmetrical", name))
-        for name in self.config.lines.power:
-            self.line_items.append(("power", name))
+    # -------------------------------------------------------------------------
+    # Конструирование пользовательского интерфейса
+    # -------------------------------------------------------------------------
 
     def _initialize_ui(self) -> None:
         self.resize(1080, 780)
@@ -198,7 +205,6 @@ class MainWindow(QMainWindow):
         params_row.addWidget(QLabel("Сопротивление R:", box))
         self.resistance_edit.setFixedWidth(80)
 
-        # Разрешить неотрицательные float с точкой или запятой через C-локаль
         self.resistance_edit.setValidator(DoubleValidator(0.0, 1e9, 4, self.resistance_edit))
         params_row.addWidget(self.resistance_edit)
         params_row.addWidget(QLabel("Ом", box))
@@ -235,10 +241,6 @@ class MainWindow(QMainWindow):
             self.line_template.set_template(self.line_items[0][1])
         return box
 
-    def _load_operation_modes(self) -> None:
-        for mode in self.config.operation_modes:
-            self.operation_mode.addItem(mode)
-
     def _create_table_view(self) -> QTableView:
         self.table_view.setModel(self.table_model)
         self.table_view.setAlternatingRowColors(True)
@@ -257,19 +259,25 @@ class MainWindow(QMainWindow):
         connect_action(self.save_button.clicked, self._save_to_database)
         return bottom
 
-    def _on_line_changed(self, index: int) -> None:
-        if 0 <= index < len(self.line_items):
-            self.line_template.set_template(self.line_items[index][1])
+    # -------------------------------------------------------------------------
+    # Заполнение пользовательского интерфейса данными
+    # -------------------------------------------------------------------------
 
-    def _set_signal_noise_file(self, path: Path) -> None:
-        resolved = path.resolve()
-        self.signal_noise_path = resolved
-        self.signal_noise_edit.set_file_path(resolved)
+    def _load_line_templates(self) -> None:
+        for name in self.config.lines.symmetrical:
+            self.line_items.append(("symmetrical", name))
+        for name in self.config.lines.asymmetrical:
+            self.line_items.append(("asymmetrical", name))
+        for name in self.config.lines.power:
+            self.line_items.append(("power", name))
 
-    def _set_noise_file(self, path: Path) -> None:
-        resolved = path.resolve()
-        self.noise_path = resolved
-        self.noise_edit.set_file_path(resolved)
+    def _load_operation_modes(self) -> None:
+        for mode in self.config.operation_modes:
+            self.operation_mode.addItem(mode)
+
+    # -------------------------------------------------------------------------
+    # Обработчики событий и функций ввода файлов
+    # -------------------------------------------------------------------------
 
     def _select_signal_noise_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -291,6 +299,24 @@ class MainWindow(QMainWindow):
         if path:
             self._set_noise_file(Path(path))
 
+    def _set_signal_noise_file(self, path: Path) -> None:
+        resolved = path.resolve()
+        self.signal_noise_path = resolved
+        self.signal_noise_edit.set_file_path(resolved)
+
+    def _set_noise_file(self, path: Path) -> None:
+        resolved = path.resolve()
+        self.noise_path = resolved
+        self.noise_edit.set_file_path(resolved)
+
+    def _on_line_changed(self, index: int) -> None:
+        if 0 <= index < len(self.line_items):
+            self.line_template.set_template(self.line_items[index][1])
+
+    # -------------------------------------------------------------------------
+    # Методы чтения состояний и значений
+    # -------------------------------------------------------------------------
+
     def _current_line_type(self) -> LineType:
         index = self.line_combo.currentIndex()
         if 0 <= index < len(self.line_items):
@@ -310,6 +336,10 @@ class MainWindow(QMainWindow):
             return float(text.replace(",", "."))
         except ValueError:
             return None
+
+    # -------------------------------------------------------------------------
+    # Обработчики действий: расчеты, обновление статуса и сохранение в базу данных
+    # -------------------------------------------------------------------------
 
     def _run_calculation(self) -> None:
         if self.signal_noise_path is None or self.noise_path is None:

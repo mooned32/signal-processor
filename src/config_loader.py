@@ -11,35 +11,9 @@ from models import (
     NormParamsConfig,
 )
 
-
-def _require_dict(value: object, section: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ConfigValidationError(f"Секция [{section}] отсутствует или имеет некорректный формат")
-    return cast(dict[str, object], value)
-
-
-def _float_list(value: object, key: str) -> list[float]:
-    if not isinstance(value, list):
-        raise ConfigValidationError(f"Параметр '{key}' должен быть списком чисел.")
-    items = cast(list[object], value)
-    result: list[float] = []
-    for item in items:
-        if isinstance(item, bool) or not isinstance(item, (int, float)):
-            raise ConfigValidationError(f"Параметр '{key}' содержит нечисловое значение.")
-        result.append(float(item))
-    return result
-
-
-def _string_list(value: object, key: str) -> list[str]:
-    if not isinstance(value, list):
-        raise ConfigValidationError(f"Параметр '{key}' должен быть списком строк.")
-    items = cast(list[object], value)
-    result: list[str] = []
-    for item in items:
-        if not isinstance(item, str):
-            raise ConfigValidationError(f"Параметр '{key}' содержит нестроковое значение.")
-        result.append(item)
-    return result
+# =============================================================================
+# Публичная точка входа API
+# =============================================================================
 
 
 def load_config(config_path: Path) -> AppConfig:
@@ -133,3 +107,38 @@ def load_config(config_path: Path) -> AppConfig:
         lines=lines,
         operation_modes=operation_modes,
     )
+
+
+# =============================================================================
+# Приватные вспомогательные методы проверки типов
+# =============================================================================
+
+
+def _require_dict(value: object, section: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ConfigValidationError(f"Секция [{section}] отсутствует или имеет некорректный формат")
+    return cast(dict[str, object], value)
+
+
+def _float_list(value: object, key: str) -> list[float]:
+    if not isinstance(value, list):
+        raise ConfigValidationError(f"Параметр '{key}' должен быть списком чисел.")
+    items = cast(list[object], value)
+    result: list[float] = []
+    for item in items:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ConfigValidationError(f"Параметр '{key}' содержит нечисловое значение.")
+        result.append(float(item))
+    return result
+
+
+def _string_list(value: object, key: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ConfigValidationError(f"Параметр '{key}' должен быть списком строк.")
+    items = cast(list[object], value)
+    result: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise ConfigValidationError(f"Параметр '{key}' содержит нестроковое значение.")
+        result.append(item)
+    return result
